@@ -151,7 +151,11 @@ Severity: 🔴 breaks the page · 🟠 broken behaviour · 🟡 correctness / qu
 | 35 | 🟡 | 7 `.pyc` files committed; `__pycache__` not gitignored | **Fixed** — untracked + ignored |
 | 36 | 🟡 | Both `bun.lock` and `package-lock.json` committed | **Flagged** — see §5 |
 
-### Backend (`videoforce-mvp`) — audited, not modified
+### Backend (`videoforce-mvp`) — Phase 0 + Phase 1 now complete
+
+> Addressed in a follow-up pass. See [§6 Backend progress](#6-backend-progress) for
+> what was built and what remains.
+
 
 | # | Sev | Issue | Status |
 |---|---|---|---|
@@ -255,3 +259,97 @@ out under 10 KB or no CSS is emitted, which is what an unreferenced entry script
    separate piece of work (and #37 depends on the naming decision in question 1). The frontend
    proxies to it when `VIDEOFORCE_API_URL` resolves, and falls back to clearly-labelled sample
    data otherwise, so the UI works either way.
+
+---
+
+## 6. Backend progress
+
+Worked in dependency order, most urgent first. Phases 0 and 1 are done.
+
+### Phase 0 — make the backend runnable
+
+Before this, the API could not be imported, built or seeded. Every item below
+was a hard blocker.
+
+| Issue | Fix |
+|---|---|
+| No `requirements.txt` / `pyproject.toml` — dependencies entirely undeclared | `apps/api/requirements.txt` + `requirements-dev.txt`, fully pinned |
+| `docker-compose.yml` built `./apps/api` with **no Dockerfile there** | Added `apps/api/Dockerfile` (python:3.12-slim, ffmpeg, non-root user, healthcheck) + `.dockerignore` |
+| Service named `api/worker` — `/` is illegal in Compose, built a non-existent `./apps/worker`, and bound 5555 (colliding with flower) | Removed, with a comment explaining when to reinstate it |
+| Postgres created db/user **`videoforge`**, every client connected as **`videoforce`** | Standardised on `videoforce` across compose, `.env.example` and config |
+| `apps/` and `apps/api/` had no `__init__.py`, so `from .app.core...` failed | Added; all imports are now absolute `apps.api.*` |
+| Two config trees: `apps/api/core/` (empty) and `apps/api/app/core/config.py`, imported inconsistently by `main.py` vs `seed.py` | Consolidated into `apps/api/core/config.py`; deleted `apps/api/app/` |
+| Config called `get_env()` at class-definition time — importing without a populated `.env` raised `ValueError`, and a **Stripe key was required just to boot** | Rewritten with pydantic-settings; safe defaults, nothing mandatory to import |
+| Config's `.env` path resolved to `videoforce-mvp/apps/videoforce-mvp/.env` — never loaded | Corrected to `parents[3]` |
+| **`migrations/env.py` defined both migration functions but never called either** — `alembic upgrade head` ran zero migrations and reported success | Added the offline/online dispatch |
+| `alembic.ini` hardcoded `postgres://…` (legacy scheme, rejected by SQLAlchemy 2.x) with mismatched credentials | Blanked; `env.py` injects `settings.DATABASE_URL` |
+| No database session layer anywhere | Added `core/db.py`: engine, `SessionLocal`, `get_db`, SQLite-aware config |
+| `models/__init__.py` exported only `Base`, so `seed.py`'s model imports raised `ImportError` | Exports all 15 models; `Base.metadata` fully populated |
+| `Makefile` drove Python through Bun (`bun run --cwd apps/api alembic …`, `bun run … bash`) | Rewritten around `docker compose exec` + a local venv; added `dev`, `test`, `install` |
+
+### Phase 1 — authentication
+
+Built from nothing: there was no auth code, no `APIRouter`, and `schemas/` was a
+0-byte file.
+
+- **`services/auth.py`** — bcrypt hashing and JWT issue/verify. Passwords are
+  SHA-256 + base64 pre-hashed so bcrypt's **72-byte silent truncation** cannot
+  weaken a long passphrase (there is a test proving two passwords sharing a
+  72-byte prefix are not interchangeable).
+- **`services/rate_limit.py`** — fixed-window limiter on login, shaped to swap
+  for Redis later.
+- **`schemas/`** — `SignupRequest`, `LoginRequest`, `RefreshRequest`,
+  `TokenPair`, `UserPublic`, `UserUpdate`. `UserPublic` cannot leak
+  `password_hash`. Passwords are explicitly **excluded** from
+  `str_strip_whitespace` so the stored secret is never silently rewritten.
+- **`core/deps.py`** — `get_current_user`, `require_admin`, `DbSession`.
+- **`routers/auth.py`** — `POST /auth/signup`, `/auth/login`, `/auth/refresh`,
+  `/auth/logout`, `GET|PATCH /auth/me`.
+- **`routers/shutterstock.py`** — existing endpoints moved out of `main.py`.
+- **`main.py`** — `create_app()` factory, routers, `/healthz` and a new
+  `/readyz` that actually checks the database.
+
+Security properties covered by tests: no user enumeration (same status and
+message for unknown email vs wrong password), refresh tokens rejected where an
+access token is required, tampered/expired tokens rejected, deactivated
+accounts refused, admin guard enforced, rate limiting with `Retry-After`.
+
+### `seed.py` — now actually runs
+
+It had never executed. Beyond the missing `services.auth` import:
+
+- passed `is_staff` / `is_superuser` to `User`, which has neither column
+- used `PromptTemplate` without importing it
+- wrote a UUID string into `AdminAuditLog.target_id` (an Integer column) and
+  omitted the non-nullable `admin_id`
+- keyed `get_or_create` on *every* field including freshly generated UUIDs, so
+  each run inserted duplicate subscriptions despite claiming idempotency
+- never created the sample project/video its docstring promised
+
+Rewritten and verified idempotent — two consecutive runs leave 2 users, 3 plans,
+2 subscriptions, 5 settings, 2 templates, 1 project, 1 video.
+
+### Verification
+
+```bash
+cd videoforce-mvp
+make install      # creates .venv, installs pinned deps
+make test         # 61 tests
+make dev          # uvicorn on :8000, /docs for the API explorer
+```
+
+61 tests pass. The full flow was also exercised over real HTTP against a running
+uvicorn process: health, readiness, signup, duplicate-email 409, login, `/auth/me`
+with and without a token, refresh, wrong-password 401 and weak-password 422.
+
+### Still outstanding
+
+| Phase | Work |
+|---|---|
+| 2 | Project/video CRUD + Pydantic contracts |
+| 3 | Wire `AIPipeline` (already 505 lines) to a job endpoint |
+| 4 | Celery worker + scheduler — `apps/worker` still does not exist; flower is idle until it does |
+| 5 | Platform OAuth and publishing for YouTube / Instagram / TikTok / X |
+| — | Email verification and password reset (SMTP settings exist, no code) |
+| — | Stripe billing (tables and keys exist, no code) |
+| — | Token deny-list on logout once Redis is wired up |

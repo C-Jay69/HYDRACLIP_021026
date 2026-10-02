@@ -39,3 +39,7 @@ venv
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# local sqlite scratch databases
+*.db
+*.sqlite3

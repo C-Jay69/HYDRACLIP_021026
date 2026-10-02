@@ -1,0 +1,28 @@
+# Videoforce API — runtime dependencies
+#
+# The repository previously declared no Python dependencies at all: no
+# requirements file, no pyproject.toml, no lockfile. Versions are pinned to
+# compatible ranges so `docker compose build` is reproducible.
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# Settings / validation
+pydantic==2.10.5
+pydantic-settings==2.7.1
+email-validator==2.2.0
+python-dotenv==1.0.1
+
+# Database
+SQLAlchemy==2.0.37
+alembic==1.14.1
+psycopg2-binary==2.9.10
+
+# Security
+bcrypt==4.2.1
+PyJWT==2.10.1
+
+# HTTP client (Shutterstock + Ollama integrations)
+httpx==0.28.1

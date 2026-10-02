@@ -422,7 +422,7 @@ class AIPipeline:
         model_path = model_map.get(voice, self.tts.model_path)
         
         # Reinitialize with correct model
-        from ..app.core.config import settings
+        from apps.api.core.config import settings
         tts = PiperTTS(model_path=model_path)
         audio_path = tts.synthesize(text)
         return audio_path
