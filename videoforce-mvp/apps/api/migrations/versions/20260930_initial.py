@@ -1,7 +1,19 @@
-"""Initial migration - create all tables for Videoforce MVP."""
+"""Initial migration - create all tables for Videoforce MVP.
+
+Revision ID: 20260930_initial
+Revises:
+"""
 
 from alembic import op
 import sqlalchemy as sa
+
+# Alembic requires these module-level identifiers to build the migration
+# chain. Without them `alembic upgrade head` aborts before running anything,
+# which is what happened to every `make migrate` until now.
+revision = "20260930_initial"
+down_revision = None
+branch_labels = None
+depends_on = None
 
 
 def upgrade():

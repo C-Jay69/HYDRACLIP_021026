@@ -168,6 +168,7 @@ def test_celery_app_registers_every_task():
         "videoforce.reap_stale_jobs",
         "videoforce.sweep_work_dir",
         "videoforce.dispatch_due_schedules",
+        "videoforce.publish_schedule",
     }
 
 
@@ -189,7 +190,10 @@ def test_maintenance_is_routed_off_the_generation_queue():
     from apps.worker.celery_app import celery_app
 
     routes = celery_app.conf.task_routes
-    assert routes["videoforce.generate_video"]["queue"] == "generation"
+    # Publishing waits on provider processing, so it belongs with the other
+    # slow work rather than in front of short maintenance ticks.
+    for task in ("videoforce.generate_video", "videoforce.publish_schedule"):
+        assert routes[task]["queue"] == "generation"
     for task in (
         "videoforce.reap_stale_jobs",
         "videoforce.sweep_work_dir",

@@ -13,11 +13,12 @@ import logging
 from celery.exceptions import SoftTimeLimitExceeded
 
 from apps.api.core.db import SessionLocal
-from apps.api.services import maintenance
+from apps.api.services import maintenance, publishing
 from apps.api.services.jobs import run_generation_job
 from apps.worker.celery_app import (
     TASK_DISPATCH_SCHEDULES,
     TASK_GENERATE_VIDEO,
+    TASK_PUBLISH_SCHEDULE,
     TASK_REAP_STALE_JOBS,
     TASK_SWEEP_WORK_DIR,
     celery_app,
@@ -64,17 +65,55 @@ def sweep_work_dir() -> dict:
 
 @celery_app.task(name=TASK_DISPATCH_SCHEDULES)
 def dispatch_due_schedules() -> dict:
+    """Claim schedules whose time has come and hand each to a publish task.
+
+    Dispatch and publication are separate tasks so one slow upload cannot
+    hold up the beat tick, and so a worker lost mid-upload affects only its
+    own schedule.
+    """
     db = SessionLocal()
     try:
         claimed = maintenance.claim_due_schedules(db)
-        if claimed:
-            # Publishing needs platform OAuth, which is the next phase.
-            logger.info(
-                "claimed %s due schedule(s) %s, but publishing is not "
-                "implemented yet",
-                len(claimed),
-                claimed,
-            )
-        return {"claimed": claimed}
+    finally:
+        db.close()
+
+    dispatched = []
+    for schedule_id in claimed:
+        try:
+            celery_app.send_task(TASK_PUBLISH_SCHEDULE, args=[schedule_id])
+            dispatched.append(schedule_id)
+        except Exception as exc:  # noqa: BLE001 - broker trouble
+            # The row is already 'running'. Record the failure rather than
+            # leaving it stuck there with no explanation.
+            logger.exception("Could not enqueue publish for schedule %s", schedule_id)
+            db = SessionLocal()
+            try:
+                schedule = db.get(publishing.Schedule, schedule_id)
+                if schedule is not None:
+                    publishing.record_failure(
+                        db, schedule, f"Could not enqueue the publish task: {exc}"
+                    )
+            finally:
+                db.close()
+
+    if claimed:
+        logger.info("dispatched %s due schedule(s): %s", len(dispatched), dispatched)
+    return {"claimed": claimed, "dispatched": dispatched}
+
+
+@celery_app.task(name=TASK_PUBLISH_SCHEDULE, bind=True)
+def publish_schedule(self, schedule_id: int) -> dict:
+    """Publish one scheduled post.
+
+    No autoretry: ``publish_schedule`` records terminal failure on the row
+    itself, and a blind retry risks double-posting when the provider
+    actually succeeded but the response was lost.
+    """
+    db = SessionLocal()
+    try:
+        return publishing.publish_schedule(db, schedule_id)
+    except SoftTimeLimitExceeded:
+        logger.error("Publishing schedule %s exceeded its time limit", schedule_id)
+        raise
     finally:
         db.close()

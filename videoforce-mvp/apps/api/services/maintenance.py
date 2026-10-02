@@ -136,8 +136,9 @@ def claim_due_schedules(db: Session, now: datetime | None = None) -> list[int]:
     Claiming flips ``pending`` -> ``running`` with a guarded UPDATE, so two
     beat ticks overlapping cannot publish the same post twice.
 
-    Publishing itself needs platform OAuth, which is the next phase; until
-    then this returns the claimed ids and the caller records why it stopped.
+    Claiming only marks the rows; the caller enqueues a publish task per id.
+    Splitting it that way keeps the beat tick short and stops one slow
+    upload from delaying every other due post.
     """
     now = now or _utcnow()
 

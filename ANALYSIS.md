@@ -151,7 +151,7 @@ Severity: 🔴 breaks the page · 🟠 broken behaviour · 🟡 correctness / qu
 | 35 | 🟡 | 7 `.pyc` files committed; `__pycache__` not gitignored | **Fixed** — untracked + ignored |
 | 36 | 🟡 | Both `bun.lock` and `package-lock.json` committed | **Flagged** — see §5 |
 
-### Backend (`videoforce-mvp`) — Phases 0–4 now complete
+### Backend (`videoforce-mvp`) — Phases 0–5 now complete
 
 > Addressed in a follow-up pass. See [§6 Backend progress](#6-backend-progress) for
 > what was built and what remains.
@@ -558,13 +558,102 @@ The compose stack itself is still unproven because Docker is unavailable here.
 asserted identical to the API's, but `make setup && make up` needs running on
 a machine with Docker.
 
+Phase 5 was verified against mocked provider HTTP, by agreement — real
+developer-app credentials for YouTube, Instagram, TikTok and X are not
+available in this environment. A full walkthrough against a mocked Google
+exercised the complete journey: signup, `access_type=offline` in the
+authorisation URL, callback, Fernet ciphertext in the database with no
+plaintext anywhere and no token in any API response, a schedule created
+through the new endpoint, an honest refusal when no rendered file existed, a
+resumable upload whose declared length matched the bytes actually sent, and a
+second publish attempt on the same schedule correctly refusing to post twice.
+The suite grew from 223 tests to **394**.
+
+### Phase 5 — Platform OAuth and publishing
+
+Four `*_encrypted` columns had existed since the initial migration and
+**nothing in the codebase ever encrypted anything**. The suffix was the only
+protection those tokens had. `cryptography` was not even a dependency.
+
+**What was added**
+
+| Component | Purpose |
+|---|---|
+| `apps/api/services/crypto.py` | Fernet encryption for stored tokens and for the OAuth `state` blob |
+| `apps/api/services/platforms/` | `base.py` plus one client each for YouTube, Instagram, TikTok and X |
+| `apps/api/services/oauth.py` | authorisation-code flow, state sealing and validation |
+| `apps/api/services/social_accounts.py` | credential storage and refresh-before-expiry |
+| `apps/api/services/publishing.py` | preflight, claim, publish, record |
+| `apps/api/routers/oauth.py` | `/platforms`, `/accounts`, `/oauth/{platform}/…` |
+| `apps/api/routers/schedules.py` | the scheduling API that did not exist |
+| `videoforce.publish_schedule` | the Celery task `dispatch_due_schedules` now hands work to |
+
+**Decisions worth recording**
+
+- **`social_accounts` is the single source of truth for credentials.**
+  `platform_tokens` duplicated every credential field. Writing secrets to
+  both would double the blast radius of a leak and leave two rows disagreeing
+  about which token is current after a refresh. The table is kept so existing
+  databases still map, and documented as unwritten.
+- **The `state` parameter is encrypted, not merely signed.** It carries the
+  PKCE code verifier, which must stay secret from anything that can read the
+  redirect URL. It also pins the flow to one user and one platform, so a
+  callback cannot attach an account to the wrong person or be replayed at a
+  different provider's callback.
+- **The callback is deliberately unauthenticated.** The browser arrives from
+  the provider with no `Authorization` header; the sealed state is what
+  identifies the user.
+- **`/oauth/{platform}/authorize` returns a URL instead of redirecting**,
+  because the caller is an authenticated XHR client — a 307 to a third-party
+  login would be followed by `fetch()` and fail CORS.
+- **Refresh is mandatory, not optional.** X access tokens last about two
+  hours. Every publish calls `ensure_fresh_token` first. A rejected refresh
+  deactivates the account and records why; a network blip does not.
+- **Provider differences are respected rather than averaged away.** Google
+  needs `access_type=offline` or it never returns a refresh token; TikTok and
+  X require PKCE; X rotates its refresh token on every use while Google does
+  not reissue one; Instagram has no refresh token at all and renews a
+  long-lived token using itself; TikTok returns HTTP 200 with an error object
+  inside, so the status code alone is not trusted.
+- **Only terminal success counts as published.** TikTok must reach
+  `PUBLISH_COMPLETE`, Instagram's container must reach `FINISHED`, and X's
+  media must finish processing. An accepted upload is not a published post.
+
+**Two bugs found in existing code while doing this**
+
+- **The repo's only Alembic migration was unusable.** It declared no
+  `revision` / `down_revision`, so `alembic upgrade head` — which is what
+  `make migrate` runs — aborted with *"Could not determine revision id"*
+  before executing a single statement. Every database to date must have been
+  created by `Base.metadata.create_all`. The identifiers were added and a
+  Phase 5 migration stacked on top.
+- **`.env.example` documented redirect URIs under an `/api` prefix that no
+  router has ever used.** Anyone registering those URIs with Google or TikTok
+  would have had every callback 404. Corrected to `/oauth/{platform}/callback`.
+
+**The honest limitation**
+
+Real developer-app credentials for the four platforms are not available here,
+so every provider interaction is verified against `httpx.MockTransport`
+replaying the documented request and response shapes. That proves the clients
+send what each API expects and interpret what it sends back. It does not prove
+the live services behave as documented.
+
+There is also a deeper blocker: **publishing needs a video file, and video
+assembly is still unimplemented**, so no real post can succeed yet regardless
+of credentials. Rather than hide that, `check_media_available` fails before
+any network call with an explicit message — *"Video assembly is not
+implemented yet, so there is nothing to upload"* — and Instagram and TikTok
+additionally need a public HTTPS media host this deployment does not have.
+
 ### Still outstanding
 
-| Phase | Work |
+| Work | Note |
 |---|---|
-| 5 | Platform OAuth and publishing for YouTube / Instagram / TikTok / X. `dispatch_due_schedules` claims due rows but stops there |
-| — | Video assembly itself: download stock media, mux with the voiceover, watermark. `create_video_from_script` raises `StageNotImplemented` until this exists |
-| — | Scheduling API: the `schedules` table has no endpoints, so nothing can create a row for beat to claim |
-| — | Email verification and password reset (SMTP settings exist, no code) |
-| — | Stripe billing (tables and keys exist, no code) |
-| — | Token deny-list on logout once Redis is wired up |
+| **Video assembly** | download stock media, mux with the voiceover, watermark. `create_video_from_script` raises `StageNotImplemented`. This is now the single thing blocking a real post |
+| **A public media host** | Instagram and TikTok fetch the file from a URL rather than accepting bytes. MinIO is in the compose stack but nothing uploads to it or issues public URLs |
+| **Live provider verification** | every platform client is proven against mocked HTTP only; each needs a registered developer app, and TikTok needs an audited app to post anything but `SELF_ONLY` |
+| **FK cascade problem** | issue #22, deliberately untouched |
+| Email verification and password reset | SMTP settings exist, no code |
+| Stripe billing | tables and keys exist, no code |
+| Token deny-list on logout | needs Redis |

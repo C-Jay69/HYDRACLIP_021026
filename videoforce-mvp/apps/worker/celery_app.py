@@ -21,6 +21,7 @@ TASK_GENERATE_VIDEO = "videoforce.generate_video"
 TASK_REAP_STALE_JOBS = "videoforce.reap_stale_jobs"
 TASK_SWEEP_WORK_DIR = "videoforce.sweep_work_dir"
 TASK_DISPATCH_SCHEDULES = "videoforce.dispatch_due_schedules"
+TASK_PUBLISH_SCHEDULE = "videoforce.publish_schedule"
 
 QUEUE_GENERATION = "generation"
 QUEUE_MAINTENANCE = "maintenance"
@@ -73,6 +74,10 @@ def create_celery_app() -> Celery:
             TASK_REAP_STALE_JOBS: {"queue": QUEUE_MAINTENANCE},
             TASK_SWEEP_WORK_DIR: {"queue": QUEUE_MAINTENANCE},
             TASK_DISPATCH_SCHEDULES: {"queue": QUEUE_MAINTENANCE},
+            # Publishing uploads large files and waits on provider
+            # processing, so it belongs on the slow queue beside
+            # generation rather than blocking short maintenance ticks.
+            TASK_PUBLISH_SCHEDULE: {"queue": QUEUE_GENERATION},
         },
         beat_schedule={
             "reap-stale-jobs": {

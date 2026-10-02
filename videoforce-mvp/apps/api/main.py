@@ -17,7 +17,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.core.config import settings
-from apps.api.routers import auth, generation, projects, shutterstock, videos
+from apps.api.routers import (
+    auth,
+    generation,
+    oauth,
+    projects,
+    schedules,
+    shutterstock,
+    videos,
+)
 
 logger = logging.getLogger("videoforce.api")
 
@@ -72,6 +80,8 @@ def create_app() -> FastAPI:
     app.include_router(videos.router)
     app.include_router(generation.router)
     app.include_router(shutterstock.router)
+    app.include_router(oauth.router)
+    app.include_router(schedules.router)
 
     # Chooses between the in-process runner and Celery. Done at app creation
     # so the choice (and the warning for "inline") is visible in the logs at

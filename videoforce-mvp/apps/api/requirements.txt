@@ -23,6 +23,9 @@ psycopg2-binary==2.9.10
 # Security
 bcrypt==4.2.1
 PyJWT==2.10.1
+# Fernet, for encrypting stored OAuth tokens. The social_accounts columns
+# were named *_encrypted from the start but nothing ever encrypted them.
+cryptography==44.0.0
 
 # HTTP client (Shutterstock + Ollama integrations)
 httpx==0.28.1

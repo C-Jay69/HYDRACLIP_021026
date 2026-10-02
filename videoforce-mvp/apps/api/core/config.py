@@ -127,6 +127,19 @@ class Settings(BaseSettings):
     # --- Stock media --------------------------------------------------------
     SHUTTERSTOCK_API_TOKEN: str = ""
 
+    # --- Secret storage ------------------------------------------------------
+    #: Fernet key material for encrypting stored OAuth tokens. When blank the
+    #: key is derived from SECRET_KEY, which means rotating SECRET_KEY strands
+    #: every connected account. Set this explicitly in production.
+    TOKEN_ENCRYPTION_KEY: str = ""
+
+    #: How long an in-flight OAuth authorisation may take before its state
+    #: blob expires.
+    OAUTH_STATE_TTL_SECONDS: int = 600
+
+    #: Refresh an access token this long before it actually expires.
+    TOKEN_REFRESH_LEEWAY_SECONDS: int = 300
+
     # --- Social platform OAuth ---------------------------------------------
     YOUTUBE_CLIENT_ID: str = ""
     YOUTUBE_CLIENT_SECRET: str = ""
@@ -143,6 +156,14 @@ class Settings(BaseSettings):
     X_CLIENT_ID: str = ""
     X_CLIENT_SECRET: str = ""
     X_REDIRECT_URI: str = ""
+
+    #: Meta versions its Graph API in the URL and retires old versions, so
+    #: this has to be configurable rather than baked into the client.
+    INSTAGRAM_GRAPH_VERSION: str = "v21.0"
+
+    #: Ceiling on how long a provider may take to finish processing an upload.
+    PUBLISH_POLL_TIMEOUT_SECONDS: float = 300.0
+    PUBLISH_POLL_INTERVAL_SECONDS: float = 5.0
 
     # --- Email --------------------------------------------------------------
     SMTP_HOST: str = "smtp.example.com"
