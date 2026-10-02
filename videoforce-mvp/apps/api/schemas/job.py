@@ -51,8 +51,34 @@ class StageInfo(BaseModel):
     )
 
 
+class StockProviderInfo(BaseModel):
+    """One stock media source and whether it is usable."""
+
+    name: str
+    label: str
+    configured: bool
+    reason: str | None = None
+    supports_video: bool
+    supports_images: bool
+    watermarked: bool = Field(
+        default=False,
+        description=(
+            "Previews from this provider carry a watermark, so a render "
+            "using them is a draft and must not be published."
+        ),
+    )
+
+
 class PipelineStatus(BaseModel):
     """What the deployment can actually do right now."""
 
     stages: list[StageInfo]
     default_stages: list[str]
+    stock_providers: list[StockProviderInfo] = Field(
+        default_factory=list,
+        description="Footage sources, in the order they are tried.",
+    )
+    output_format: dict[str, int] = Field(
+        default_factory=dict,
+        description="Frame size and rate every render is produced at.",
+    )

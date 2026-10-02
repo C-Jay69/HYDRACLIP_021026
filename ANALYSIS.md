@@ -646,12 +646,175 @@ any network call with an explicit message — *"Video assembly is not
 implemented yet, so there is nothing to upload"* — and Instagram and TikTok
 additionally need a public HTTPS media host this deployment does not have.
 
+## Phase 6 — video assembly
+
+`create_video_from_script` synthesised a voiceover and then raised
+`StageNotImplemented`. It now renders a real MP4. No frames are generated:
+the picture is stock footage sourced per scene, the voice is Piper, and the
+captions are burned in from the narration text.
+
+### How a render works
+
+`services/assembly.py`, five stages:
+
+1. **Plan** — the script is split into scenes, one per sentence, merging
+   anything under 40 characters into its neighbour. A two-word sentence
+   does not deserve its own clip and a sub-second cut reads as a glitch.
+   Each scene derives its own stock search query from its longest
+   non-stopword terms, falling back to the project topic when a sentence is
+   all filler.
+2. **Narrate** — each scene is synthesised *separately* and measured.
+   Scene length comes from the real audio, so picture and voice cannot
+   drift apart.
+3. **Source** — footage per scene, video preferred, stills as fallback,
+   already-used assets excluded so a short video does not show the same
+   clip three times. A scene that matches nothing gets a plain background
+   and a warning rather than killing the render.
+4. **Build** — every scene is encoded to an identical clip of exactly the
+   right length. Clips are looped or trimmed; stills get a slow Ken Burns
+   push via `zoompan` so the frame is never completely static. Landscape
+   footage is scaled to cover and centre-cropped to 9:16.
+5. **Join** — clips are concatenated (stream copy, since they were encoded
+   identically), the narration is laid over them, captions are burned in,
+   and the MP4 is written with `+faststart`.
+
+### Decisions worth knowing
+
+**Subtitle timings come from measured TTS durations, not Whisper.** We
+already know what the words are. Transcribing our own synthesised speech
+back would add a heavy dependency to the render path, take longer than the
+render, and introduce recognition errors into text that was never
+uncertain. Whisper stays available for the separate `/speech-to-text`
+endpoint. Within a scene, time is divided between caption chunks in
+proportion to character count — a good approximation, because the chunks
+come from one sentence spoken by one voice at a near-constant rate.
+
+**Captions are burned from ASS, not SRT.** libass lays subtitles out
+against the script's declared resolution and an SRT declares none, so
+ffmpeg falls back to a 384×288 canvas and scales up. On a 1080×1920 frame
+that multiplies every size by nearly seven: a 28pt font rendered at ~186px
+and a 160px bottom margin put the text near the *top* of the screen. The
+ASS file declares `PlayResX/PlayResY` matching the frame, so the configured
+sizes are real pixels. An SRT sidecar is still written, because that is
+what YouTube and TikTok accept as a caption upload.
+
+**Narration is padded to the scene length.** When a scene is clamped up to
+`SCENE_MIN_SECONDS`, its picture is longer than its sound. Unpadded, the
+audio track ends short, `-shortest` truncates the file, and every caption
+after the first clamped scene drifts by the accumulated difference. Each
+segment is now fitted to exactly its scene length with `apad`, which also
+normalises the formats so the concat demuxer is safe.
+
+**Clip type is detected, not trusted.** Stills and clips need completely
+different ffmpeg invocations (`-loop 1` plus `zoompan` versus
+`-stream_loop`). A provider that mislabels an asset, or an extensionless
+URL, used to fail deep inside ffmpeg with `Option loop not found`, which
+explains nothing. `media.is_still_image` checks the actual codec.
+
+**The watermark is drawn with libass too.** It used `drawtext`, which is an
+optional ffmpeg build flag — absent from the static build used on checkouts
+without a system ffmpeg, where it failed with `No such filter: 'drawtext'`.
+Burned-in captions already make libass mandatory, so the watermark reuses
+it: one text engine, one dependency. It sits top-right so it cannot collide
+with the bottom-centre captions.
+
+### Stock providers
+
+`services/stock/` puts four sources behind one interface, tried in
+`STOCK_PROVIDER_ORDER`. Only providers with a key take part, so one key is
+enough to render.
+
+| Provider | Video | Photos | Watermark | Notes |
+|---|---|---|---|---|
+| **Pexels** | yes | yes | no | Default first. `orientation=portrait` on both endpoints, and `video_files[]` gives exact pixel sizes so we pick a native 1080×1920 file instead of downscaling 4K. Auth is the bare key, *not* `Bearer`. 200 req/hour |
+| **Pixabay** | yes | yes | no | Key goes in the `key` query param, not a header. Video search has **no** orientation filter. `videos.large` is often an empty URL with size 0, so `medium` is preferred. Errors come back as plain text, not JSON |
+| **Unsplash** | no | yes | no | Photos only. `urls.raw` is an imgix base, so an exact vertical crop costs no extra API call — but the `ixid` must be preserved, so we only append. 50 req/hour until approved |
+| **Shutterstock** | yes | yes | **yes** | Last by default. Search results are *comp* previews with a visible watermark; clearing it needs a paid licensing call this codebase does not make |
+
+Three provider rules are implemented rather than merely noted:
+
+- Pixabay requires search responses to be **cached for 24 hours** —
+  `services/stock/cache.py`. The cache is process-local, which is the honest
+  limit: each worker keeps its own copy, so the effective request rate
+  scales with worker count. Shared Redis is the obvious upgrade.
+- Pixabay **forbids permanent hotlinking** — every asset is downloaded
+  before use. ffmpeg wanted a local file anyway.
+- Unsplash requires a **GET to `links.download_location` on every
+  download**. `note_download` does it, and deliberately swallows its own
+  failures: losing a view count is not a reason to abandon a render whose
+  bytes already arrived.
+
+All three free providers require attribution, so the photographer and
+source page travel on every asset and are persisted to
+`video.generation_params_json.render.credits`. A credit that has to be
+reconstructed later is a credit that eventually goes missing.
+
+**A Shutterstock-sourced render is flagged `draft: true`** with a warning
+that it must not be published, because the only file available is the
+watermarked comp.
+
+### Bugs found in pre-existing code
+
+1. **`concatenate_videos` wrote a fixed `/tmp/ffmpeg_concat_list.txt`**, so
+   two renders running at once overwrote each other's list and spliced the
+   wrong clips together. Same class as the fixed-path TTS bug found
+   earlier. Now a per-job path.
+2. **`FFmpegProcessor` invoked the bare name `ffmpeg`** in six places, so it
+   only worked when a system package happened to be installed and silently
+   ignored `FFMPEG_BINARY`. Resolution now goes through `services/media.py`,
+   which also picks up the `imageio-ffmpeg` wheel.
+3. **`add_watermark` discarded the text watermark when a logo was also
+   requested** — both branches read `input_path` and wrote `output_path`, so
+   the second overwrote the first. The steps now chain.
+4. **The Dockerfile installed neither Piper nor a voice model**, so the
+   voiceover and assemble stages could only ever fail inside a correctly
+   built container. It now installs `piper-tts` and `fonts-dejavu-core`, and
+   compose mounts `./models/piper` (the model is a ~60MB download,
+   deliberately not baked into the image).
+
+### Verification
+
+The sandbox cannot reach pexels.com, pixabay.com or api.unsplash.com, and
+there are no API keys, so **every provider is tested against
+`httpx.MockTransport` replaying the response shapes from each vendor's
+published documentation** — the same arrangement agreed for the Phase 5
+platform clients. That proves we send the documented parameters and parse
+the documented responses; it does not prove the live services behave as
+documented.
+
+The **renderer, by contrast, is verified for real**. ffmpeg generates
+synthetic source media and a tone stands in for narration (no Piper voice
+model is downloadable here), then the assembler runs end to end and the
+output is probed. This is not a weaker test than using real stock footage:
+the assembler only ever consumes measured durations and local files, so the
+code path is identical. Confirmed on a real render: `1080x1920`,
+`Video: h264`, `Audio: aac`, duration matching the sum of scene durations
+to within one frame, captions burned in at the correct size and position.
+
+The full job path was exercised too: `POST /projects/{id}/generate` with
+`stages=[script, voiceover, assemble]` → job `completed` at 100% →
+`video.storage_key` pointing at a 2.6MB MP4 on disk →
+`generation_params_json.render` carrying duration, frame size, scene count,
+credits and the draft flag.
+
+Tests: **394 → 476**. `/pipeline/status` now also reports which stock
+providers are configured and the output frame size, so a client can tell
+"no API key" apart from "nothing matched your topic".
+
+### Still not done
+
+Assembly produces a file on a local disk. Nothing uploads it to MinIO or
+issues a public URL, which Instagram and TikTok both require — see the
+table below. Scene footage is matched by keyword, not by meaning; an LLM
+pass over the scene text would pick better clips. There is no music bed, no
+transitions between scenes, and no B-roll variation within a long scene.
+
+
 ### Still outstanding
 
 | Work | Note |
 |---|---|
-| **Video assembly** | download stock media, mux with the voiceover, watermark. `create_video_from_script` raises `StageNotImplemented`. This is now the single thing blocking a real post |
-| **A public media host** | Instagram and TikTok fetch the file from a URL rather than accepting bytes. MinIO is in the compose stack but nothing uploads to it or issues public URLs |
+| **A public media host** | Now the single thing blocking a real post. Assembly writes an MP4 to `MEDIA_WORK_DIR`; Instagram and TikTok fetch the file from a URL rather than accepting bytes. MinIO is in the compose stack but nothing uploads to it or issues public URLs |
 | **Live provider verification** | every platform client is proven against mocked HTTP only; each needs a registered developer app, and TikTok needs an audited app to post anything but `SELF_ONLY` |
 | **FK cascade problem** | issue #22, deliberately untouched |
 | Email verification and password reset | SMTP settings exist, no code |

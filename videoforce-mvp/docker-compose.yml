@@ -83,7 +83,20 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
       - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/models/piper}
       - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-base}
+      # Stock footage. At least one of these is required for the assemble
+      # stage; they are tried in STOCK_PROVIDER_ORDER. Shutterstock is last
+      # because its previews are watermarked comps.
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - PIXABAY_API_KEY=${PIXABAY_API_KEY}
+      - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY}
       - SHUTTERSTOCK_API_TOKEN=${SHUTTERSTOCK_API_TOKEN}
+      - STOCK_PROVIDER_ORDER=${STOCK_PROVIDER_ORDER:-pexels,pixabay,unsplash,shutterstock}
+      # Render output. Vertical by default, matching the platforms the
+      # publishing stage targets.
+      - VIDEO_WIDTH=${VIDEO_WIDTH:-1080}
+      - VIDEO_HEIGHT=${VIDEO_HEIGHT:-1920}
+      - VIDEO_FPS=${VIDEO_FPS:-30}
+      - SUBTITLES_ENABLED=${SUBTITLES_ENABLED:-true}
       - APP_URL=${APP_URL:-http://localhost:3000}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       - ENVIRONMENT=${ENVIRONMENT:-development}
@@ -101,6 +114,15 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    volumes:
+      # Piper voice models, kept out of the image because they are ~60MB
+      # each and swappable. Download one into ./models/piper; the URLs are
+      # in apps/api/Dockerfile. Without it the voiceover and assemble
+      # stages correctly report themselves unavailable.
+      - ./models/piper:/models/piper:ro
+      # Renders are written here. A shared volume means the API can serve a
+      # file the worker produced; without it they each see their own /tmp.
+      - media_work:/tmp/videoforce
     ports:
       - "8000:8000"
 
@@ -119,6 +141,11 @@ services:
       --concurrency=${WORKER_CONCURRENCY:-2}
       -Q generation,maintenance
     environment: *api_env
+    volumes:
+      # The worker is what actually renders, so it needs both the voice
+      # model and the shared scratch space.
+      - ./models/piper:/models/piper:ro
+      - media_work:/tmp/videoforce
     depends_on:
       postgres:
         condition: service_healthy
@@ -168,5 +195,6 @@ services:
 
 volumes:
   postgres_data:
+  media_work:
   minio_data:
   ollama_models:

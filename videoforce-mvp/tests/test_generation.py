@@ -262,9 +262,10 @@ def test_unavailable_stage_is_rejected_with_503_before_queueing(
     assert db.query(VideoJob).count() == 0
 
 
-def test_assemble_stage_is_reported_as_not_implemented(
+def test_assemble_stage_is_rejected_when_no_provider_is_configured(
     client, auth_headers, deferred_runner
 ):
+    """Preflight refuses up front rather than failing the job later."""
     headers = auth_headers()
     project_id = _project(client, headers)
 
@@ -274,7 +275,9 @@ def test_assemble_stage_is_reported_as_not_implemented(
         headers=headers,
     )
     assert response.status_code == 503
-    assert "assemble" in response.json()["detail"]["unavailable_stages"]
+    detail = response.json()["detail"]
+    assert "assemble" in detail["unavailable_stages"]
+    assert "PEXELS_API_KEY" in detail["unavailable_stages"]["assemble"]
 
 
 def test_quota_exhaustion_blocks_generation_with_402(
@@ -623,7 +626,9 @@ def test_pipeline_status_lists_stage_availability(client, auth_headers, pipeline
     assert set(stages) == {"script", "voiceover", "assemble"}
     assert stages["script"]["available"] is True
     assert stages["assemble"]["available"] is False
-    assert "not implemented" in stages["assemble"]["reason"]
+    # Assembly is implemented now, so the reason is a missing dependency
+    # rather than missing code: no stock provider key is set in the suite.
+    assert "stock media provider is configured" in stages["assemble"]["reason"]
     assert body["default_stages"] == ["script"]
 
 

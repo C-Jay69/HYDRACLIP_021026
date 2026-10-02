@@ -295,6 +295,19 @@ class WhisperSTT:
         )
 
 
+def _ffmpeg() -> str:
+    """The ffmpeg binary to run.
+
+    These helpers used to invoke the bare name "ffmpeg", so they only worked
+    when a system package happened to be installed and silently ignored
+    FFMPEG_BINARY. Resolution now goes through services.media, which also
+    picks up the imageio-ffmpeg wheel on checkouts without a system build.
+    """
+    from apps.api.services.media import ffmpeg_path
+
+    return ffmpeg_path()
+
+
 class FFmpegProcessor:
     """Local video/audio processing using FFmpeg."""
 
@@ -313,7 +326,7 @@ class FFmpegProcessor:
             Output video path
         """
         cmd = [
-            "ffmpeg", "-i", input_path,
+            _ffmpeg(), "-i", input_path,
             "-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,"
                    f"crop={width}:{height}",
             "-c:v", "libx264",
@@ -341,23 +354,44 @@ class FFmpegProcessor:
         Returns:
             Output video path
         """
+        from apps.api.services import subtitles as subs
+
+        # Each step reads whatever the previous one produced. Previously
+        # both branches read `input_path` and wrote `output_path`, so asking
+        # for text *and* a logo silently discarded the text.
+        current = input_path
+
         if watermark_text:
+            # Rendered with libass rather than drawtext: drawtext is an
+            # optional ffmpeg build flag and is absent from the static
+            # build used when no system ffmpeg is installed, where this
+            # step failed with "No such filter: 'drawtext'". libass is
+            # already required for burned-in captions.
+            overlay = _work_path(".ass", prefix="mark")
+            Path(overlay).write_text(
+                subs.watermark_ass(
+                    watermark_text,
+                    width=settings.VIDEO_WIDTH,
+                    height=settings.VIDEO_HEIGHT,
+                ),
+                encoding="utf-8",
+            )
+            stage_out = output_path if not logo_path else _work_path(".mp4", prefix="mark")
             cmd = [
-                "ffmpeg", "-i", input_path,
-                "-vf", f"drawtext=text='{watermark_text}':"
-                       "fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
-                       "fontsize=24:fontcolor=white@0.8:x=(w-text_w-10):y=(h-text_h-10)",
+                _ffmpeg(), "-i", current,
+                "-vf", f"ass='{subs.escape_for_filter(overlay)}'",
                 "-c:v", "libx264",
                 "-preset", "fast",
                 "-crf", "23",
                 "-c:a", "copy",
-                "-y", output_path,
+                "-y", stage_out,
             ]
             subprocess.run(cmd, capture_output=True, check=True)
-        
+            current = stage_out
+
         if logo_path:
             cmd = [
-                "ffmpeg", "-i", input_path,
+                _ffmpeg(), "-i", current,
                 "-i", logo_path,
                 "-filter_complex", "[1:v][0:v]overlay=main_w-overlay_w-10:main_h-overlay_h-10",
                 "-c:v", "libx264",
@@ -367,7 +401,12 @@ class FFmpegProcessor:
                 "-y", output_path,
             ]
             subprocess.run(cmd, capture_output=True, check=True)
-        
+            current = output_path
+
+        if current != output_path:
+            # Nothing was asked for; still honour the output contract.
+            shutil.copyfile(current, output_path)
+
         return output_path
 
     @staticmethod
@@ -385,7 +424,7 @@ class FFmpegProcessor:
             output_path = video_path.replace(".mp4", ".wav")
         
         cmd = [
-            "ffmpeg", "-i", video_path,
+            _ffmpeg(), "-i", video_path,
             "-vn",
             "-acodec", "pcm_s16le",
             "-ar", "16000",
@@ -406,14 +445,16 @@ class FFmpegProcessor:
         Returns:
             Output video path
         """
-        # Create file list for ffmpeg concat
-        file_list_path = "/tmp/ffmpeg_concat_list.txt"
+        # Was a fixed /tmp/ffmpeg_concat_list.txt, so two renders running at
+        # the same time overwrote each other's list and spliced the wrong
+        # clips together. Same class of bug as the fixed TTS output path.
+        file_list_path = _work_path(".txt", prefix="concat")
         with open(file_list_path, "w") as f:
             for path in input_paths:
-                f.write(f"file '{path}'\n")
+                f.write(f"file '{Path(path).resolve()}'\n")
 
         cmd = [
-            "ffmpeg", "-f", "concat", "-safe", "0",
+            _ffmpeg(), "-f", "concat", "-safe", "0",
             "-i", file_list_path,
             "-c", "copy",
             "-y", output_path,
@@ -435,7 +476,7 @@ class FFmpegProcessor:
             Output path
         """
         cmd = [
-            "ffmpeg", "-i", input_path,
+            _ffmpeg(), "-i", input_path,
             "-filter_complex", f"[0:a]volume={volume_multiplier}[a]",
             "-map", "0:v",
             "-map", "[a]",
@@ -540,51 +581,111 @@ class AIPipeline:
         result = await self.stt.transcribe_async(audio_path)
         return result
 
-    async def create_video_from_script(self, script: Dict[str, Any], 
-                                       stock_media: List[Dict] = None,
-                                       watermark: bool = True) -> Dict[str, Any]:
-        """Create a complete video from a generated script.
+    async def create_video_from_script(
+        self,
+        script: Dict[str, Any],
+        stock_media: List[Dict] = None,
+        watermark: bool = True,
+        output_path: str = None,
+        on_progress: Any = None,
+    ) -> Dict[str, Any]:
+        """Render a finished MP4 from a generated script.
 
-        Partially implemented. TTS runs; assembly does not exist yet and
-        raises StageNotImplemented rather than reporting a video that was
-        never rendered.
+        No frames are generated. The video is assembled from stock footage
+        sourced scene by scene, narrated with Piper, and captioned from the
+        narration text. See services/assembly.py for the stage breakdown.
 
-        Intended orchestration:
-        1. Generate TTS audio from the script          (implemented)
-        2. Search Shutterstock for relevant stock media (caller-supplied)
-        3. Combine audio + video using FFmpeg           (NOT implemented)
-        4. Add watermark if needed                      (NOT implemented)
-        
         Args:
             script: Script dict from generate_script()
-            stock_media: Pre-selected Shutterstock media items
-            watermark: Whether to add branding watermark
-        
+            stock_media: Ignored. Footage is sourced per scene now, because
+                one flat list cannot be matched to individual scenes.
+            watermark: Whether to burn the branding watermark on afterwards.
+            output_path: Where to write the MP4. Defaults to the work dir.
+            on_progress: Optional (stage, fraction) callback.
+
         Returns:
-            Dict with video generation metadata and storage path
+            Dict describing the rendered file.
         """
-        # Step 1: Generate TTS audio (this part is real).
-        audio_path = await self.text_to_speech(script["script"])
-
-        # Step 2: Collect stock media URLs if the caller pre-selected any.
-        video_urls = []
-        if stock_media:
-            video_urls = [m.get("preview_url") or m.get("url") for m in stock_media[:5]]
-
-        # Step 3: Assemble the video. Not implemented.
-        #
-        # The previous version built an output path, never wrote a file to it,
-        # and returned {"status": "generated"} regardless -- so every caller
-        # would have been told a video existed when nothing had been rendered.
-        # The path was also f"/tmp/video_{topic}.mp4" with the user-supplied
-        # topic interpolated raw, so a topic of "../../etc/x" escaped /tmp.
-        #
-        # Raising keeps the failure honest and lets the job layer record
-        # exactly which stage stopped and why.
-        raise StageNotImplemented(
-            "video assembly is not implemented: downloading stock media and "
-            "muxing it with the voiceover still needs to be built"
+        from apps.api.services.assembly import (
+            AssemblyError,
+            AssemblyUnavailable,
+            VideoAssembler,
         )
+
+        text = script.get("script") or ""
+        if not text.strip():
+            raise PipelineError("The script is empty, so there is nothing to render.")
+
+        voice = script.get("voice") or "lessac"
+
+        # The assembler narrates scene by scene so it can measure each
+        # segment, so hand it a synthesiser bound to the chosen voice
+        # rather than the whole-script text_to_speech().
+        tts = PiperTTS(voice=voice)
+
+        async def synthesise(segment: str, destination: str) -> str:
+            return await tts.synthesize_async(segment, destination)
+
+        assembler = VideoAssembler(synthesiser=synthesise)
+
+        # Check Piper here too: the assembler can only see that *a*
+        # synthesiser was supplied, not that its voice model exists.
+        tts_problem = PiperTTS.unavailable_reason(voice)
+        if tts_problem:
+            raise StageUnavailable(f"Narration is unavailable because {tts_problem}.")
+
+        problem = assembler.unavailable_reason()
+        if problem:
+            raise StageUnavailable(problem)
+
+        if output_path is None:
+            # Never built from the topic: a topic of "../../etc/x" used to
+            # escape the work directory entirely.
+            output_path = _work_path(".mp4", prefix="video")
+
+        try:
+            result = await assembler.render(
+                text,
+                topic=script.get("topic", ""),
+                output_path=output_path,
+                on_progress=on_progress,
+            )
+        except AssemblyUnavailable as exc:
+            # A missing dependency is not a bad request; surface it as an
+            # unavailable stage so the job layer can say so plainly.
+            raise StageUnavailable(str(exc)) from exc
+        except AssemblyError as exc:
+            raise PipelineError(str(exc)) from exc
+
+        final_path = str(result.video_path)
+
+        watermark_applied = False
+        if watermark:
+            stamped = _work_path(".mp4", prefix="wm")
+            try:
+                FFmpegProcessor.add_watermark(
+                    final_path, stamped, watermark_text="Videoforce"
+                )
+                final_path = stamped
+                watermark_applied = True
+            except Exception as exc:  # noqa: BLE001
+                # A missing watermark is cosmetic; losing the whole render
+                # over it would not be. It must not be *reported* as applied
+                # though -- that is the same dishonesty this stage used to
+                # have when it claimed to render videos it never wrote.
+                result.warnings.append(f"Watermarking failed: {exc}")
+
+        payload = {
+            "status": "rendered",
+            "video_path": final_path,
+            "subtitle_path": (
+                str(result.subtitle_path) if result.subtitle_path else None
+            ),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "watermarked": watermark_applied,
+            **result.summary(),
+        }
+        return payload
 
     async def close(self):
         """Close all underlying connections."""

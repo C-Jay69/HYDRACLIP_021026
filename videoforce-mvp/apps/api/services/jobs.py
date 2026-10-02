@@ -72,17 +72,19 @@ class Stage:
 STAGES: tuple[Stage, ...] = (
     Stage("script", 40, "Write the script with the LLM"),
     Stage("voiceover", 80, "Synthesise the voiceover with Piper"),
-    Stage("assemble", 100, "Mux the voiceover with stock media"),
+    Stage("assemble", 100, "Source stock footage and render the MP4"),
 )
 
 STAGE_NAMES: tuple[str, ...] = tuple(s.name for s in STAGES)
 
 #: Stages a request runs when it does not say otherwise.
 #:
-#: Script only, because that is the one stage this codebase can actually
-#: finish today: voiceover needs the Piper binary plus a voice model, and
-#: assembly is not implemented at all. Defaulting to the full set would mean
-#: every default request failed.
+#: Script only. Assembly is implemented now, but it still needs the Piper
+#: binary, a voice model, ffmpeg and at least one stock provider API key --
+#: so defaulting to the full set would make every out-of-the-box request
+#: fail on a fresh checkout. Callers that have the dependencies ask for
+#: ["script", "voiceover", "assemble"] explicitly, and /jobs/preflight
+#: reports which of those are ready.
 DEFAULT_STAGES: tuple[str, ...] = ("script",)
 
 
@@ -93,6 +95,17 @@ def ordered_stages(requested: Iterable[str]) -> list[Stage]:
 
 
 # --- Preflight -----------------------------------------------------------------
+
+
+async def _NOOP_SYNTHESISER(text: str, destination: str) -> str:
+    """Placeholder passed to the assembler during preflight only.
+
+    ``VideoAssembler.unavailable_reason`` treats a missing synthesiser as a
+    problem, which is right at render time and wrong here: preflight checks
+    Piper separately and would otherwise report it twice.
+    """
+    raise NotImplementedError("preflight does not synthesise audio")
+
 
 
 async def preflight(
@@ -118,9 +131,23 @@ async def preflight(
             if reason:
                 problems[stage.name] = reason
         elif stage.name == "assemble":
-            problems[stage.name] = (
-                "video assembly is not implemented yet; see ANALYSIS.md"
-            )
+            # Assembly needs ffmpeg, a voice model and at least one stock
+            # provider. Report every missing piece together -- discovering
+            # them one failed job at a time is miserable.
+            from apps.api.services.assembly import VideoAssembler
+
+            missing = []
+            tts_reason = PiperTTS.unavailable_reason()
+            if tts_reason:
+                missing.append(f"narration is unavailable because {tts_reason}")
+
+            assembler = VideoAssembler(synthesiser=_NOOP_SYNTHESISER)
+            reason = assembler.unavailable_reason()
+            if reason:
+                missing.append(reason)
+
+            if missing:
+                problems[stage.name] = " ".join(missing)
 
     return problems
 
@@ -358,7 +385,49 @@ async def run_generation_job(job_id: int, pipeline: AIPipeline | None = None) ->
                     db.commit()
 
                 elif stage.name == "assemble":
-                    await pipeline.create_video_from_script(script or {})
+                    if not script:
+                        stored = db.scalar(
+                            select(Video.script_text).where(Video.id == video_id)
+                        )
+                        if not stored:
+                            raise PipelineError(
+                                "assembly needs a script, but this video has none"
+                            )
+                        script = {"script": stored}
+
+                    script.setdefault("topic", params.get("topic", ""))
+                    script.setdefault("voice", params.get("voice", "lessac"))
+
+                    def _report(stage_name: str, fraction: float) -> None:
+                        # Assembly is the long stage; surface sub-progress so
+                        # a three-minute render is not a frozen 80%.
+                        span = stage.progress_at_end - 80
+                        _set_progress(db, job_id, 80 + int(span * fraction))
+
+                    rendered = await pipeline.create_video_from_script(
+                        script,
+                        watermark=params.get("watermark", True),
+                        on_progress=_report,
+                    )
+
+                    # The rendered file is the video now, not the voiceover
+                    # the previous stage parked in storage_key.
+                    existing = db.scalar(
+                        select(Video.generation_params_json).where(
+                            Video.id == video_id
+                        )
+                    ) or {}
+                    merged = {**existing, "render": rendered}
+
+                    db.execute(
+                        update(Video)
+                        .where(Video.id == video_id)
+                        .values(
+                            storage_key=rendered["video_path"],
+                            generation_params_json=merged,
+                        )
+                    )
+                    db.commit()
 
             except StageNotImplemented as exc:
                 _finish(

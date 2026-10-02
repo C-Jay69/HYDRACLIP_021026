@@ -15,10 +15,13 @@ from apps.api.schemas.job import (
     GenerationRequest,
     PipelineStatus,
     StageInfo,
+    StockProviderInfo,
 )
 from apps.api.schemas.video import VideoJobPublic, VideoPublic
+from apps.api.core.config import settings
 from apps.api.services import jobs as job_service
 from apps.api.services import quota as quota_service
+from apps.api.services.stock import get_stock_library
 
 router = APIRouter(tags=["generation"])
 
@@ -42,6 +45,16 @@ async def pipeline_status(user: CurrentUser) -> PipelineStatus:
             for stage in job_service.STAGES
         ],
         default_stages=list(job_service.DEFAULT_STAGES),
+        # Which footage sources are usable, so a client can tell "no API key"
+        # apart from "nothing matched your topic".
+        stock_providers=[
+            StockProviderInfo(**entry) for entry in get_stock_library().status()
+        ],
+        output_format={
+            "width": settings.VIDEO_WIDTH,
+            "height": settings.VIDEO_HEIGHT,
+            "fps": settings.VIDEO_FPS,
+        },
     )
 
 

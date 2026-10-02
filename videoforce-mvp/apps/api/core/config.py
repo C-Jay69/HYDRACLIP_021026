@@ -127,6 +127,52 @@ class Settings(BaseSettings):
     # --- Stock media --------------------------------------------------------
     SHUTTERSTOCK_API_TOKEN: str = ""
 
+    # --- Stock media providers -----------------------------------------------
+    #: Pexels: free photos *and* video, portrait orientation on both, and
+    #: video_files[] lists exact pixel dimensions so we can pick a native
+    #: 1080x1920 file instead of downscaling 4K. Preferred source.
+    PEXELS_API_KEY: str = ""
+
+    #: Pixabay: free, royalty-free, no watermark, and it has video. Their
+    #: terms require caching results for 24h and downloading rather than
+    #: hotlinking; both are implemented in services/stock.
+    PIXABAY_API_KEY: str = ""
+
+    #: Unsplash: photos only. Their guidelines require pinging the
+    #: download_location endpoint on each download and crediting the
+    #: photographer.
+    UNSPLASH_ACCESS_KEY: str = ""
+
+    #: Preference order when sourcing footage. The first configured provider
+    #: that can satisfy a scene wins.
+    STOCK_PROVIDER_ORDER: str = "pexels,pixabay,unsplash,shutterstock"
+
+    #: Pixabay requires search responses to be cached for 24 hours.
+    STOCK_CACHE_TTL_SECONDS: int = 86400
+
+    # --- Video assembly --------------------------------------------------------
+    #: Vertical by default: the platforms Phase 5 publishes to (Shorts,
+    #: Reels, TikTok) are all 9:16.
+    VIDEO_WIDTH: int = 1080
+    VIDEO_HEIGHT: int = 1920
+    VIDEO_FPS: int = 30
+
+    #: Seconds a still image is held on screen when a scene has no clip.
+    SCENE_MIN_SECONDS: float = 2.0
+    SCENE_MAX_SECONDS: float = 12.0
+
+    #: Burned-in captions. Subtitles are timed from the measured duration of
+    #: each synthesised sentence, so no speech recognition is involved.
+    SUBTITLES_ENABLED: bool = True
+    SUBTITLE_FONT_SIZE: int = 56
+
+    #: Ceiling on a single render.
+    RENDER_TIMEOUT_SECONDS: int = 900
+
+    #: Absolute path to ffmpeg/ffprobe. Blank means "find it on PATH".
+    FFMPEG_BINARY: str = ""
+    FFPROBE_BINARY: str = ""
+
     # --- Secret storage ------------------------------------------------------
     #: Fernet key material for encrypting stored OAuth tokens. When blank the
     #: key is derived from SECRET_KEY, which means rotating SECRET_KEY strands
