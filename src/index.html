@@ -4,10 +4,321 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-    <title>Bun + React</title>
-    <script type="module" src="./frontend.tsx" async></script>
+    <title>Videoforce - AI Video Content Scheduling</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0a0a0f;
+        --bg-secondary: #12121a;
+        --fg: #e8e8f0;
+        --muted: #6b6b80;
+        --accent: #a855f7;
+        --card: #1a1a24;
+        --border: #2a2a3a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Inter", sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      .bg-pattern {
+        position: fixed;
+        inset: 0;
+        background-image: 
+          radial-gradient(ellipse 80% 50% at 20% 20%, rgba(168, 85, 247, 0.15) 0%, transparent 50%),
+          radial-gradient(ellipse 60% 40% at 80% 80%, rgba(168, 85, 247, 0.1) 0%, transparent 50%);
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      .noise-overlay {
+        position: fixed;
+        inset: 0;
+        opacity: 0.03;
+        pointer-events: none;
+        z-index: -1;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3C/svg%3E");
+        background-repeat: repeat;
+        background-size: 256px 256px;
+      }
+
+      .hero-banner {
+        background: linear-gradient(135deg, var(--bg) 0%, var(--bg-secondary) 100%);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #1a0a2e;
+        font-weight: 600;
+        padding: 12px 24px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(168, 85, 247, 0.3);
+      }
+
+      .btn-primary:active {
+        transform: translateY(0);
+      }
+
+      .feature-card {
+        transition: transform 0.3s, box-shadow 0.3s;
+      }
+
+      .feature-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+      }
+
+      .stat-number {
+        font-size: 3rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--accent), #c084fc);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .section-divider {
+        width: 40px;
+        height: 1px;
+        background: var(--border);
+        margin: 2rem auto;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div class="bg-pattern">
+      <div class="noise-overlay" />
+      
+      <!-- Navigation -->
+      <nav class="hero-banner sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <a href="#" class="text-2xl font-bold tracking-wider">Videoforce</a>
+          <div class="hidden md:flex items-center gap-6">
+            <a href="#features" class="text-[var(--muted)] hover:text-[var(--fg)] transition-colors">Features</a>
+            <a href="#how-it-works" class="text-[var(--muted)] hover:text-[var(--fg)] transition-colors">How it Works</a>
+            <a href="#pricing" class="text-[var(--muted)] hover:text-[var(--fg)] transition-colors">Pricing</a>
+          </div>
+          <a href="#cta" class="btn-primary">Get Started</a>
+        </div>
+      </nav>
+
+      <!-- Hero Section -->
+      <section min-height="100vh" class="relative py-24 px-6 md:px-12">
+        <div class="max-w-7xl mx-auto text-center">
+          <div class="inline-flex items-center gap-2 mb-6 px-4 py-1 rounded-full bg-[var(--card)]">
+            <span class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse"></span>
+            <span class="text-[var(--muted)] text-sm">AI-Powered</span>
+          </div>
+          
+          <h1 class="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
+            AI-Powered<br />
+            Video Content<br />
+            Scheduling
+          </h1>
+          
+          <p class="text-lg md:text-xl text-[var(--muted)] max-w-2xl mx-auto mb-10">
+            Create, customize, and schedule video content for platforms like YouTube, Instagram, 
+            TikTok, and X — entirely with local AI models and licensed stock media.
+          </p>
+          
+          <div class="grid grid-cols-2 gap-6 md:grid-cols-4 justify-center px-4">
+            <div class="feature-card pt-8">
+              <div class="text-4xl mb-3">🎬</div>
+              <h3 class="text-xl font-bold mb-2">Script Generation</h3>
+              <p class="text-[var(--muted)] text-sm">Generate compelling video scripts from topics using local LLMs</p>
+            </div>
+            <div class="feature-card pt-8">
+              <div class="text-4xl mb-3">🖼️</div>
+              <h3 class="text-xl font-bold mb-2">Stock Media</h3>
+              <p class="text-[var(--muted)] text-sm">Search and license professional stock images and videos</p>
+            </div>
+            <div class="feature-card pt-8">
+              <div class="text-4xl mb-3">🎵</div>
+              <h3 class="text-xl font-bold mb-2">TTS & Audio</h3>
+              <p class="text-[var(--muted)] text-sm">Local text-to-speech and music generation</p>
+            </div>
+            <div class="feature-card pt-8">
+              <div class="text-4xl mb-3">📅</div>
+              <h3 class="text-xl font-bold mb-2">Scheduling</h3>
+              <p class="text-[var(--muted)] text-sm">Auto-schedule and publish to YouTube, Instagram, TikTok, X</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stats Section -->
+      <section class="py-20 px-6 md:px-12 border-y border-[var(--border)] bg-[var(--bg-secondary)]">
+        <div class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
+          <div>
+            <div class="stat-number">50+</div>
+            <div class="text-[var(--muted)]">Stock Categories</div>
+          </div>
+          <div>
+            <div class="stat-number">3</div>
+            <div class="text-[var(--muted)]">Pricing Tiers</div>
+          </div>
+          <div>
+            <div class="stat-number">99%</div>
+            <div class="text-[var(--muted)]">Local Processing</div>
+          </div>
+          <div>
+            <div class="stat-number">10m+</div>
+            <div class="text-[var(--muted)]">Creators Trusted</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- How It Works Section -->
+      <section class="py-24 px-6 md:px-12" id="how-it-works">
+        <div class="max-w-7xl mx-auto">
+          <div class="text-center mb-16">
+            <h2 class="text-4xl font-bold mb-4">How It Works</h2>
+            <p class="text-[var(--muted)] max-w-2xl mx-auto">Turn any idea into a scheduled video in 3 steps</p>
+          </div>
+          
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+            <div class="feature-card p-8 text-center">
+              <div class="w-16 h-16 rounded-xl bg-[var(--accent)]/10 mb-6 flex items-center justify-center">
+                <svg class="w-8 h-8 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                  <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+                </svg>
+              </div>
+              <h3 class="text-xl font-bold mb-3">1. Generate Script</h3>
+              <p class="text-[var(--muted)]">Enter a topic and our AI generates a compelling video script using your local Ollama model</p>
+            </div>
+            
+            <div class="feature-card p-8 text-center">
+              <div class="w-16 h-16 rounded-xl bg-[var(--accent)]/10 mb-6 flex items-center justify-center">
+                <svg class="w-8 h-8 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                  <line x1="9" y1="9" x2=9.01 y2="9" />
+                  <line x1="15" y1="9" x2="15.01" y2="9" />
+                </svg>
+              </div>
+              <h3 class="text-xl font-bold mb-3">2. Add Media</h3>
+              <p class="text-[var(--muted)]">Search Shutterstock for professional stock footage and images, or upload your own</p>
+            </div>
+            
+            <div class="feature-card p-8 text-center">
+              <div class="w-16 h-16 rounded-xl bg-[var(--accent)]/10 mb-6 flex items-center justify-center">
+                <svg class="w-8 h-8 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <polyline points="4 7 4 4 20 4 20 7" />
+                  <line x1="9" y1="20" x2="15" y2="20" />
+                  <line x1="12" y1="4" x2="12" y2="14" />
+                </svg>
+              </div>
+              <h3 class="text-xl font-bold mb-3">3. Schedule & Publish</h3>
+              <p class="text-[var(--muted)]">Schedule your video for YouTube, Instagram, TikTok, or X with auto-publishing</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA Section -->
+      <section class="bg-[var(--accent)]/10 py-24 px-6 md:px-12" id="cta">
+        <div class="max-w-3xl mx-auto text-center">
+          <h2 class="text-4xl font-bold mb-4">Ready to Create?</h2>
+          <p class="text-[var(--muted)] mb-8 max-w-2xl mx-auto">Join thousands of creators who are using AI to automate their video content</p>
+          <a href="#how-it-works" class="btn-primary px-8 py-3">Start Creating Free</a>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer class="border-t border-[var-border] py-12 px-6 md:px-12 bg-[var(--bg-secondary)]">
+        <div class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-5 gap-8">
+          <div>
+            <h4 class="font-bold mb-4">Videoforce</h4>
+            <p class="text-[var(--muted)] text-sm">AI-powered video content scheduling platform</p>
+          </div>
+          <div>
+            <h4 class="font-bold mb-4">Platforms</h4>
+            <ul class="space-y-2 text-[var(--muted)] text-sm">
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">YouTube</a></li>
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">Instagram</a></li>
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">TikTok</a></li>
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">X</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-bold mb-4">Company</h4>
+            <ul class="space-y-2 text-[var(--muted)] text-sm">
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">About</a></li>
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">Blog</a></li>
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">Privacy</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-bold mb-4">Resources</h4>
+            <ul class="space-y-2 text-[var(--muted)] text-sm">
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">Docs</a></li>
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">API</a></li>
+              <li><a href="#" class="hover:text-[var(--fg)] transition-colors">Status</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-bold mb-4">Contact</h4>
+            <ul class="space-y-2 text-[var(--muted)] text-sm">
+              <li><a href="mailto:hello@videoforce.com" class="hover:text-[var(--fg)] transition-colors">hello@videoforce.com</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="mt-8 pt-8 border-t border-[var-border] flex flex-col md:flex-row justify-center gap-4">
+          <p class="text-[var(--muted)] text-sm">2024 Videoforce. All rights reserved.</p>
+          <div class="flex gap-2">
+            <a href="#" class="w-8 h-8 rounded-full bg-[var(--border)] flex items-center justify-center hover:bg-[var(--accent)] transition-colors">
+              <svg class="w-4 h-4 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+              </svg>
+            </a>
+            <a href="#" class="w-8 h-8 rounded-full bg-[var(--border)] flex items-center justify-center hover:bg-[var(--accent)] transition-colors">
+              <svg class="w-4 h-4 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2H6a2 2 0 00-2 2v7h-4v-7a6 6 0 01-6-6z" />
+                <path d="M2 9h4v12H2V9z" />
+              </svg>
+            </a>
+            <a href="#" class="w-8 h-8 rounded-full bg-[var(--border)] flex items-center justify-center hover:bg-[var(--accent)] transition-colors">
+              <svg class="w-4 h-4 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                <path d="M16 11.37A4 4 0 1112 8a4 4 0 016.36 5.37" />
+                <line x1="21" y1="15" x2="23" y2="15" />
+              </svg>
+            </a>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="./frontend.tsx" async></script>
   </body>
 </html>
