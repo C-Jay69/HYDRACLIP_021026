@@ -13,6 +13,7 @@ from apps.api.models import Video, VideoJob
 from apps.api.schemas.job import (
     GenerationAccepted,
     GenerationRequest,
+    MediaStorageInfo,
     PipelineStatus,
     StageInfo,
     StockProviderInfo,
@@ -22,6 +23,7 @@ from apps.api.core.config import settings
 from apps.api.services import jobs as job_service
 from apps.api.services import quota as quota_service
 from apps.api.services.stock import get_stock_library
+from apps.api.services.storage import get_storage
 
 router = APIRouter(tags=["generation"])
 
@@ -55,6 +57,21 @@ async def pipeline_status(user: CurrentUser) -> PipelineStatus:
             "height": settings.VIDEO_HEIGHT,
             "fps": settings.VIDEO_FPS,
         },
+        media_storage=_media_storage(),
+    )
+
+
+def _media_storage() -> MediaStorageInfo:
+    """Whether a finished render gets a URL third parties can fetch."""
+    storage = get_storage()
+    problem = storage.configuration_error()
+    return MediaStorageInfo(
+        backend="s3" if storage.enabled else "local",
+        configured=problem is None,
+        reason=problem,
+        # Instagram and TikTok cannot publish without this being true.
+        public_urls=problem is None,
+        warning=storage.external_url_warning(),
     )
 
 

@@ -479,13 +479,19 @@ class TestPreflight:
 
 class TestMediaAvailability:
     def test_youtube_without_a_file_is_refused_clearly(self, db, make_user, configured):
-        """The honest failure: assembly is not implemented, so no file
-        exists to upload."""
+        """The honest failure: nothing was rendered, so there are no bytes.
+
+        The key is an object key that is not in any bucket (object storage
+        is off in the suite), so neither a local file nor a download can
+        produce one.
+        """
         user = make_user()
         video = make_video(db, user.id, storage_key="videos/not-on-disk.mp4")
         request = publishing.build_request(video, None, type("A", (), {"account_id": "a"})())
 
-        with pytest.raises(publishing.NotPublishable, match="Video assembly is not"):
+        with pytest.raises(
+            publishing.NotPublishable, match="no rendered video file could be found"
+        ):
             publishing.check_media_available(get_platform("youtube"), request)
 
     def test_instagram_without_a_url_is_refused_clearly(self, db, make_user, configured):
@@ -493,8 +499,14 @@ class TestMediaAvailability:
         video = make_video(db, user.id)
         request = publishing.build_request(video, None, type("A", (), {"account_id": "a"})())
 
-        with pytest.raises(publishing.NotPublishable, match="public media host"):
+        with pytest.raises(
+            publishing.NotPublishable, match="public HTTPS\\s+URL"
+        ) as caught:
             publishing.check_media_available(get_platform("instagram"), request)
+
+        # The message must name the actual cause, which is now a
+        # configuration choice rather than missing code.
+        assert "STORAGE_BACKEND=local" in str(caught.value)
 
     def test_a_real_file_satisfies_youtube(self, db, make_user, configured, tmp_path):
         path = tmp_path / "v.mp4"
@@ -722,7 +734,7 @@ class TestPublishSchedule:
 
         result = publishing.publish_schedule(db, schedule.id)
         assert result["published"] is False
-        assert "Video assembly is not implemented" in result["error"]
+        assert "no rendered video file could be found" in result["error"]
 
 
 def unclosable(session):

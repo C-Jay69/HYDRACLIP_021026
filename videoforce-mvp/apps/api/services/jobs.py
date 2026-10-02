@@ -21,6 +21,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Sequence
 
 from sqlalchemy import func, select, update
@@ -305,6 +306,51 @@ def request_cancel(db: Session, job: VideoJob) -> bool:
 # --- Execution ---------------------------------------------------------------------
 
 
+
+def _store_render(rendered: dict, video_id: int, user_id: int) -> dict | None:
+    """Upload a finished render to object storage.
+
+    Returns the stored-object record, or None when object storage is off.
+
+    Deliberately non-fatal: if the upload fails the render still exists on
+    disk and YouTube and X can still publish it, so the job records a
+    warning instead of throwing away several minutes of work.
+    """
+    from apps.api.services import storage as storage_service
+
+    storage = storage_service.get_storage()
+    if storage.configuration_error():
+        return None
+
+    local = rendered.get("video_path")
+    if not local:
+        return None
+
+    key = storage_service.media_key(video_id, user_id, Path(local).name)
+    try:
+        stored = storage.upload(local, key)
+    except storage_service.StorageError as exc:
+        logger.warning("render upload failed for video %s: %s", video_id, exc)
+        rendered.setdefault("warnings", []).append(
+            f"Upload to object storage failed, so the video is only on the "
+            f"worker's local disk and cannot be fetched by Instagram or "
+            f"TikTok: {exc}"
+        )
+        return None
+
+    caveat = storage.external_url_warning()
+    if caveat:
+        rendered.setdefault("warnings", []).append(caveat)
+
+    if not settings.MEDIA_RETAIN_LOCAL:
+        try:
+            Path(local).unlink(missing_ok=True)
+        except OSError as exc:  # noqa: BLE001
+            logger.debug("could not remove scratch file %s: %s", local, exc)
+
+    return stored.to_dict()
+
+
 async def run_generation_job(job_id: int, pipeline: AIPipeline | None = None) -> None:
     """Execute one generation job. Owns its own DB session.
 
@@ -410,6 +456,17 @@ async def run_generation_job(job_id: int, pipeline: AIPipeline | None = None) ->
                         on_progress=_report,
                     )
 
+                    # Publish the render to object storage if it is on.
+                    # Instagram and TikTok fetch the file from a URL rather
+                    # than accepting bytes, so a video that only exists on
+                    # the worker's disk cannot be posted to either.
+                    pointer = rendered["video_path"]
+                    stored = _store_render(rendered, video_id, user_id)
+                    if stored is not None:
+                        pointer = stored["key"]
+                        rendered["storage"] = stored
+                        rendered["public_url"] = stored.get("url")
+
                     # The rendered file is the video now, not the voiceover
                     # the previous stage parked in storage_key.
                     existing = db.scalar(
@@ -418,12 +475,16 @@ async def run_generation_job(job_id: int, pipeline: AIPipeline | None = None) ->
                         )
                     ) or {}
                     merged = {**existing, "render": rendered}
+                    if rendered.get("public_url"):
+                        # build_request() reads this, and an explicitly
+                        # recorded URL wins over a freshly signed one.
+                        merged["public_url"] = rendered["public_url"]
 
                     db.execute(
                         update(Video)
                         .where(Video.id == video_id)
                         .values(
-                            storage_key=rendered["video_path"],
+                            storage_key=pointer,
                             generation_params_json=merged,
                         )
                     )

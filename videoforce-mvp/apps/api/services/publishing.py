@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
-import os
 from datetime import datetime, timezone
 
 from sqlalchemy import update
@@ -18,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.models import Video
 from apps.api.models.schedule import PublishedPost, Schedule
+from apps.api.services import storage as storage_service
 from apps.api.services.platforms import (
     PlatformError,
     PublishRequest,
@@ -89,18 +89,20 @@ def build_request(video: Video, schedule: Schedule, account) -> PublishRequest:
     """Assemble the provider-neutral publish request.
 
     ``storage_key`` is the only pointer the schema has to the rendered file.
-    Whether it is a local path or an object-store key decides which providers
-    can be used: the ones that fetch by URL need a public host, which this
-    deployment does not yet have.
+    It is either a local path (object storage off) or a bucket key (on), and
+    the storage layer resolves both: providers that upload bytes get a local
+    file, fetching it back out of the bucket if the scratch copy is gone,
+    and providers that fetch by URL get a signed URL.
     """
     params = video.generation_params_json or {}
-    local_path = video.storage_key if video.storage_key else None
-    if local_path and not os.path.isfile(local_path):
-        local_path = None
+    local_path = storage_service.local_copy(video.storage_key)
+    url = storage_service.public_url(
+        video.storage_key, recorded=params.get("public_url")
+    )
 
     return PublishRequest(
-        video_url=params.get("public_url"),
-        file_path=local_path,
+        video_url=url,
+        file_path=str(local_path) if local_path else None,
         title=(params.get("title") or f"Video {video.id}")[:200],
         description=(video.script_text or "")[:5000],
         tags=list(params.get("tags") or []),
@@ -117,19 +119,22 @@ def check_media_available(client, request: PublishRequest) -> None:
     never rendered.
     """
     if client.needs_public_url:
-        if not request.video_url and not request.file_path:
+        # A local file only counts for providers that can also take bytes.
+        if not request.video_url and not (
+            client.can_upload_bytes and request.file_path
+        ):
             raise NotPublishable(
-                f"{client.label} downloads the video from a public HTTPS URL. "
-                f"No such URL is recorded for this video, and no local file "
-                f"was found either. Video assembly and a public media host "
-                f"must both be in place before {client.label} publishing can "
-                f"work."
+                f"{client.label} downloads the video from a public HTTPS "
+                f"URL, and none is available for this video. Either it has "
+                f"not been rendered yet, or object storage is off "
+                f"(STORAGE_BACKEND=local) so the render only exists on the "
+                f"worker's disk and has no URL."
             )
     elif not request.file_path:
         raise NotPublishable(
             f"{client.label} uploads the file itself, but no rendered video "
-            f"file exists at the recorded location. Video assembly is not "
-            f"implemented yet, so there is nothing to upload."
+            f"file could be found for this video -- it has either not been "
+            f"rendered yet, or the stored object is missing from the bucket."
         )
 
 

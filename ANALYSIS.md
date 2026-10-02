@@ -803,18 +803,115 @@ providers are configured and the output frame size, so a client can tell
 
 ### Still not done
 
-Assembly produces a file on a local disk. Nothing uploads it to MinIO or
-issues a public URL, which Instagram and TikTok both require — see the
-table below. Scene footage is matched by keyword, not by meaning; an LLM
-pass over the scene text would pick better clips. There is no music bed, no
-transitions between scenes, and no B-roll variation within a long scene.
+Scene footage is matched by keyword, not by meaning; an LLM pass over the
+scene text would pick better clips. There is no music bed, no transitions
+between scenes, and no B-roll variation within a long scene. (The "file
+only exists on a local disk" problem noted here was fixed in Phase 7,
+below.)
+
+
+
+## Phase 7 — a public media host
+
+### The problem
+
+Phase 6 ended with a real MP4 and no way to hand it to half the platforms.
+`storage_key` held a path like `/tmp/videoforce/wm_8f3a.mp4`, which is
+meaningful only on the container that happened to render it. Instagram and
+TikTok do not accept bytes: you give them a URL and *they* fetch it. So two
+of the four publishing targets could never work, no matter how good the
+render was.
+
+MinIO had been sitting in `docker-compose.yml` since the first commit with
+`MINIO_*` settings wired into config — and not one line of code that used
+them. No boto3 dependency, no client, no upload.
+
+### What was built
+
+`services/storage.py` wraps an S3-compatible bucket (MinIO locally, S3/R2/
+Spaces in production). The design decisions worth recording:
+
+**Two endpoints, kept strictly apart.** A presigned URL's signature covers
+the hostname, so you cannot sign against `http://minio:9000` and
+string-replace the host afterwards — the provider gets a 403. `ObjectStorage`
+therefore holds two boto3 clients: `MINIO_ENDPOINT` for uploads between
+containers, and `MEDIA_PUBLIC_BASE_URL` for signing URLs that leave the
+network. Getting this wrong is invisible until a real provider rejects the
+fetch, so `external_url_warning()` reports the mismatch up front, through
+`/pipeline/status` and on the job itself.
+
+It is a *warning*, not an error: a deployment publishing only to YouTube and
+X never needs a public URL, and refusing to render would be wrong.
+
+**Presigned URLs, not a public bucket.** A world-readable bucket means every
+render anyone produces is permanently enumerable. SigV4, path-style
+addressing (MinIO has no per-bucket DNS), 24h expiry — providers queue
+downloads, so a 15-minute URL expires mid-fetch.
+
+**`STORAGE_BACKEND` defaults to `local`.** The `MINIO_*` settings have
+working defaults baked in, so an unconfigured deployment would look
+configured and fail at upload. Same reasoning as `DEFAULT_STAGES` in
+Phase 4: the default must be the thing that works with nothing running.
+
+**No migration.** `is_object_key()` tells the two apart by shape — absolute
+path means local disk, relative means bucket key. Rows written before this
+change keep resolving to their files.
+
+**Upload failure is not fatal.** `_store_render` logs it, appends to the
+job's warnings, and leaves the local path in `storage_key`. Throwing away
+several minutes of rendering because S3 returned a 503 would be a bad
+trade, and YouTube and X can still publish from the local file.
+
+### A bug this surfaced
+
+`check_media_available` treated a local file as an acceptable substitute
+for a URL on *any* provider needing one. That is true for TikTok, which
+falls back to a chunked byte upload, and false for Instagram, which has no
+such fallback. The single `needs_public_url` flag was conflating "fetches
+from a URL" with "cannot accept bytes". Split into `needs_public_url` plus
+`can_upload_bytes`, so Instagram now fails early and says why instead of
+dying inside the Graph API.
+
+### Verification
+
+Tested against moto's threaded S3 server over real HTTP rather than a
+mock — presigned URLs are genuinely fetched. One honest limit: **moto does
+not verify signatures**, so these tests prove URL shape, host, routing and
+payload, not that tampering is rejected. Real MinIO and S3 enforce that.
+
+End to end, with storage on: `script, voiceover, assemble` → job
+`completed` at 100% → `storage_key` = `videos/1/1/wm_dc34b6b3.mp4` → object
+present in the bucket → presigned GET returns **200, 1 381 171 bytes,
+`Content-Type: video/mp4`** → the downloaded file probes as
+`1080x1920 [DAR 9:16]` h264 High + AAC-LC 44100 mono → local scratch file
+deleted → all four platforms report publishable.
+
+New: `GET /videos/{id}/media` returns a link rather than streaming bytes
+(proxying video would tie up a worker for the length of the download). When
+there is no URL it returns a null one plus a `reason`, so a client can tell
+"not rendered yet" from "object storage is off".
+
+Tests: **476 → 519**. OpenAPI: 32 → 33 paths.
+
+### Still not done
+
+`MEDIA_PUBLIC_BASE_URL` defaults to `http://localhost:9000` in compose,
+which is reachable from the host and nowhere else — publishing to Instagram
+or TikTok from a laptop still needs a tunnel or a real bucket. TikTok's
+`PULL_FROM_URL` additionally requires the URL's domain to be verified in
+the TikTok developer portal, so a presigned MinIO URL will not satisfy it;
+`tiktok.py` already falls back to `FILE_UPLOAD` for that case. Nothing ever
+deletes objects from the bucket — there is no retention policy and no
+accounting against `Plan.storage_limit_gb`.
 
 
 ### Still outstanding
 
 | Work | Note |
 |---|---|
-| **A public media host** | Now the single thing blocking a real post. Assembly writes an MP4 to `MEDIA_WORK_DIR`; Instagram and TikTok fetch the file from a URL rather than accepting bytes. MinIO is in the compose stack but nothing uploads to it or issues public URLs |
+| **Live provider verification** | now the single thing blocking a real post — see the row below |
+| **A publicly reachable bucket** | the code is done (Phase 7); the compose default `MEDIA_PUBLIC_BASE_URL=http://localhost:9000` is not reachable from the internet, so Instagram/TikTok need a tunnel or a real S3/R2 bucket configured |
+| **Media retention** | nothing deletes objects from the bucket, and `Plan.storage_limit_gb` is not enforced against actual usage |
 | **Live provider verification** | every platform client is proven against mocked HTTP only; each needs a registered developer app, and TikTok needs an audited app to post anything but `SELF_ONLY` |
 | **FK cascade problem** | issue #22, deliberately untouched |
 | Email verification and password reset | SMTP settings exist, no code |

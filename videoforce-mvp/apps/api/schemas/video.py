@@ -84,3 +84,23 @@ class QuotaStatus(BaseModel):
     unlimited: bool
     period_start: datetime
     period_end: datetime
+
+
+class MediaLink(BaseModel):
+    """Where to fetch a rendered video."""
+
+    video_id: int
+    url: str | None = Field(
+        default=None,
+        description=(
+            "Time-limited URL for the rendered file. Null when the video "
+            "has not been rendered, or when object storage is off and the "
+            "file only exists on the worker's disk."
+        ),
+    )
+    expires_in_seconds: int | None = None
+    content_type: str = "video/mp4"
+    storage: str = Field(description="'s3' or 'local'.")
+    reason: str | None = Field(
+        default=None, description="Why no URL could be produced."
+    )

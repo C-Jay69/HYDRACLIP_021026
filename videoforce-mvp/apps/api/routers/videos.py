@@ -13,14 +13,17 @@ from sqlalchemy import delete, func, select
 from apps.api.core.deps import CurrentUser, DbSession, OwnedVideo, PageParams
 from apps.api.models import Video, VideoJob
 from apps.api.schemas.common import Page
+from apps.api.core.config import settings
 from apps.api.schemas.video import (
     VIDEO_STATUSES,
+    MediaLink,
     QuotaStatus,
     VideoJobPublic,
     VideoPublic,
     VideoUpdate,
 )
 from apps.api.services import quota as quota_service
+from apps.api.services import storage as storage_service
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -129,6 +132,57 @@ def delete_video(video: OwnedVideo, db: DbSession) -> Response:
     db.delete(video)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+
+@router.get("/{video_id}/media", response_model=MediaLink)
+def get_video_media(video: OwnedVideo) -> MediaLink:
+    """A URL for the rendered file.
+
+    Returns the link rather than streaming the bytes: the object store can
+    serve the file directly, and proxying video through the API would tie
+    up a worker for the length of the download.
+
+    A null URL with a `reason` is a deliberate answer, not an error -- the
+    video may simply not be rendered yet, and the client needs to tell that
+    apart from a failure.
+    """
+    storage = storage_service.get_storage()
+    backend = "s3" if storage.enabled else "local"
+
+    if not video.storage_key:
+        return MediaLink(
+            video_id=video.id,
+            storage=backend,
+            reason="This video has not been rendered yet.",
+        )
+
+    if not storage_service.is_object_key(video.storage_key):
+        return MediaLink(
+            video_id=video.id,
+            storage=backend,
+            reason=(
+                "The render is on the worker's local disk and has no URL. "
+                "Set STORAGE_BACKEND=s3 so finished videos are uploaded to "
+                "the object store."
+            ),
+        )
+
+    problem = storage.configuration_error()
+    if problem:
+        return MediaLink(video_id=video.id, storage=backend, reason=problem)
+
+    try:
+        url = storage.url_for(video.storage_key)
+    except storage_service.StorageError as exc:
+        return MediaLink(video_id=video.id, storage=backend, reason=str(exc))
+
+    return MediaLink(
+        video_id=video.id,
+        url=url,
+        expires_in_seconds=settings.MEDIA_URL_EXPIRY_SECONDS,
+        storage=backend,
+    )
 
 
 @router.get("/{video_id}/jobs", response_model=list[VideoJobPublic])

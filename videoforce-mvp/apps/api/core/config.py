@@ -48,10 +48,42 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # --- Object storage -----------------------------------------------------
+    # These are plain S3 settings despite the MinIO names: they work
+    # unchanged against AWS S3, Cloudflare R2, Backblaze B2 or Spaces.
     MINIO_ENDPOINT: str = "http://localhost:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET: str = "videoforce"
+
+    #: "local" keeps rendered files on disk; "s3" uploads them to the bucket
+    #: above. Default local, so a fresh checkout works with no object store
+    #: running -- the MinIO defaults above would otherwise make an
+    #: unconfigured deployment look configured.
+    STORAGE_BACKEND: str = "local"
+
+    S3_REGION: str = "us-east-1"
+
+    #: MinIO serves path-style URLs (host/bucket/key). Virtual-host style
+    #: (bucket.host/key) needs per-bucket DNS, which MinIO does not set up.
+    S3_FORCE_PATH_STYLE: bool = True
+
+    #: The externally reachable base URL of the object store.
+    #:
+    #: This is the setting that decides whether Instagram and TikTok can
+    #: actually fetch a video. MINIO_ENDPOINT is usually an internal address
+    #: like http://minio:9000, which resolves only inside the Docker
+    #: network; a URL signed against it is useless to a third party. Set
+    #: this to the public HTTPS address of the bucket (or a CDN in front of
+    #: it) and URLs are signed against that host instead.
+    MEDIA_PUBLIC_BASE_URL: str = ""
+
+    #: How long a signed media URL stays valid. Providers queue downloads,
+    #: so this needs slack; a URL that expires mid-fetch fails the publish.
+    MEDIA_URL_EXPIRY_SECONDS: int = 86400
+
+    #: Keep the local scratch copy after a successful upload. Off by
+    #: default: the worker's disk is not where finished videos should live.
+    MEDIA_RETAIN_LOCAL: bool = False
 
     # --- Security -----------------------------------------------------------
     SECRET_KEY: str = INSECURE_SECRET_KEY

@@ -69,6 +69,24 @@ class StockProviderInfo(BaseModel):
     )
 
 
+class MediaStorageInfo(BaseModel):
+    """Where rendered media lives."""
+
+    backend: str = Field(description="'s3' or 'local'.")
+    configured: bool
+    reason: str | None = None
+    public_urls: bool = Field(
+        description=(
+            "Whether renders get a URL a third party can fetch. Instagram "
+            "and TikTok cannot publish without one."
+        )
+    )
+    warning: str | None = Field(
+        default=None,
+        description="Why a generated URL may not be reachable externally.",
+    )
+
+
 class PipelineStatus(BaseModel):
     """What the deployment can actually do right now."""
 
@@ -81,4 +99,8 @@ class PipelineStatus(BaseModel):
     output_format: dict[str, int] = Field(
         default_factory=dict,
         description="Frame size and rate every render is produced at.",
+    )
+    media_storage: MediaStorageInfo | None = Field(
+        default=None,
+        description="Where finished renders are kept, and whether they get a URL.",
     )

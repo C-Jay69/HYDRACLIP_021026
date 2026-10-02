@@ -109,6 +109,12 @@ class PlatformClient:
     #: True when the provider downloads the file from a URL we supply, rather
     #: than accepting the bytes directly.
     needs_public_url: bool = False
+    #: True when the provider can also accept the raw bytes. TikTok sets both
+    #: flags: it prefers a URL but falls back to a chunked file upload, so a
+    #: local render is still publishable. Instagram sets only the first --
+    #: for it a missing URL is fatal, and saying so early is the difference
+    #: between a clear error and an opaque one from the Graph API.
+    can_upload_bytes: bool = True
 
     authorize_endpoint: str = ""
     token_endpoint: str = ""

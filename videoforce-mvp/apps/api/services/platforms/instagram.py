@@ -30,6 +30,7 @@ class InstagramClient(PlatformClient):
     #: Instagram never accepts bytes — it fetches the file from a URL you
     #: give it, which must be publicly reachable over HTTPS.
     needs_public_url = True
+    can_upload_bytes = False
 
     @property
     def graph_root(self) -> str:

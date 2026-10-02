@@ -35,3 +35,8 @@ httpx==0.28.1
 # and apps/worker did not exist.
 celery[redis]==5.4.0
 redis==5.2.1
+
+# S3-compatible object storage for rendered media (services/storage.py).
+# Instagram and TikTok fetch the video from a URL rather than accepting
+# bytes, so finished renders have to live somewhere with one.
+boto3==1.43.107
