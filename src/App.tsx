@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { APITester } from "./APITester";
+import { StockMediaBrowser } from "./components/StockMediaBrowser";
 import "./index.css";
 
 import logo from "./logo.svg";
@@ -29,6 +30,7 @@ export function App() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <StockMediaBrowser />
           <APITester />
         </CardContent>
       </Card>
