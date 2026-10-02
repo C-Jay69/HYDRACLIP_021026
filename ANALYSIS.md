@@ -151,7 +151,7 @@ Severity: 🔴 breaks the page · 🟠 broken behaviour · 🟡 correctness / qu
 | 35 | 🟡 | 7 `.pyc` files committed; `__pycache__` not gitignored | **Fixed** — untracked + ignored |
 | 36 | 🟡 | Both `bun.lock` and `package-lock.json` committed | **Flagged** — see §5 |
 
-### Backend (`videoforce-mvp`) — Phase 0 + Phase 1 now complete
+### Backend (`videoforce-mvp`) — Phases 0–2 now complete
 
 > Addressed in a follow-up pass. See [§6 Backend progress](#6-backend-progress) for
 > what was built and what remains.
@@ -329,24 +329,78 @@ It had never executed. Beyond the missing `services.auth` import:
 Rewritten and verified idempotent — two consecutive runs leave 2 users, 3 plans,
 2 subscriptions, 5 settings, 2 templates, 1 project, 1 video.
 
+### Phase 2 — project and video CRUD
+
+The API had no resource endpoints at all: 13 paths, of which 6 were stock-media
+search. It is now 20, and a user can actually own something.
+
+**Endpoints added**
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/projects` | 201; owner comes from the token |
+| `GET` | `/projects` | paginated, `?status=`, `?q=` title search, includes `video_count` |
+| `GET` | `/projects/{id}` | |
+| `PATCH` | `/projects/{id}` | title / topic / settings only |
+| `DELETE` | `/projects/{id}` | cascades to videos and jobs |
+| `GET` | `/projects/{id}/videos` | paginated |
+| `GET` | `/videos` | paginated, `?status=`, `?project_id=` |
+| `GET` | `/videos/quota` | remaining monthly allowance |
+| `GET` | `/videos/{id}` | |
+| `PATCH` | `/videos/{id}` | `script_text` only |
+| `DELETE` | `/videos/{id}` | |
+| `GET` | `/videos/{id}/jobs` | job history, newest first |
+
+**Decisions worth recording**
+
+- **Ownership violations return 404, not 403.** A 403 confirms the row exists and
+  belongs to someone else, which is an id-enumeration oracle. "Missing" and "not
+  yours" now produce byte-identical responses. Verified over HTTP, not just in
+  tests. Admins bypass the ownership check.
+- **Clients cannot set `status`.** It is absent from `ProjectUpdate` and
+  `VideoUpdate`, so a user cannot mark a failed render "completed". Same for
+  `user_id` — ownership is read from the token and an injected body field is
+  ignored. Both are covered by tests.
+- **Only `script_text` is editable on a video**, so a creator can fix the AI draft
+  before rendering. Edits and deletes are refused with 409 while a render is in
+  flight; changing the script mid-render would desync the output from the stored
+  text.
+- **Deletion cascades in application code.** The models declare no `ForeignKey`
+  constraints, so there is no database-level cascade to inherit — deleting a
+  project explicitly removes its videos and their jobs. This is a workaround for
+  issue #22, not a fix for it.
+- **Quota is metered from `usage_events`, never by counting `videos` rows.**
+  Deleting a render therefore does not refund an allowance that was already
+  spent. The period is the active subscription's billing window, falling back to
+  the calendar month when there is no usable one; `video_limit_monthly = 0` means
+  unlimited. Exhausted quota raises **402 Payment Required** naming the plan and
+  the counts.
+- **No `POST /videos`.** Videos come into existence through the generation
+  pipeline so that quota is always accounted for; an open create endpoint would
+  bypass it entirely. That endpoint arrives in Phase 3.
+
+`services/quota.py` and its 402 gate are written and tested now precisely because
+Phase 3 depends on them.
+
 ### Verification
 
 ```bash
 cd videoforce-mvp
 make install      # creates .venv, installs pinned deps
-make test         # 61 tests
+make test         # 126 tests
 make dev          # uvicorn on :8000, /docs for the API explorer
 ```
 
-61 tests pass. The full flow was also exercised over real HTTP against a running
-uvicorn process: health, readiness, signup, duplicate-email 409, login, `/auth/me`
-with and without a token, refresh, wrong-password 401 and weak-password 422.
+126 tests pass (61 from Phase 1, 65 added in Phase 2). The flow was also exercised
+over real HTTP against a running uvicorn process with two separate accounts:
+signup, project create/list/patch/delete, pagination, quota, and — for every
+mutating route — a confirmation that the second user gets a 404 indistinguishable
+from a genuinely missing id, and that the row survives the attempt.
 
 ### Still outstanding
 
 | Phase | Work |
 |---|---|
-| 2 | Project/video CRUD + Pydantic contracts |
 | 3 | Wire `AIPipeline` (already 505 lines) to a job endpoint |
 | 4 | Celery worker + scheduler — `apps/worker` still does not exist; flower is idle until it does |
 | 5 | Platform OAuth and publishing for YouTube / Instagram / TikTok / X |

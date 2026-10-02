@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from apps.api.core.db import get_db
-from apps.api.models import User
+from apps.api.models import Project, User, Video
+from apps.api.schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from apps.api.services.auth import TokenError, decode_token
 
 # auto_error=False so a missing header produces our 401 shape, not FastAPI's.
@@ -80,3 +82,68 @@ def client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+# --- Pagination --------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Pagination:
+    limit: int
+    offset: int
+
+
+def pagination(
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(0, ge=0),
+) -> Pagination:
+    return Pagination(limit=limit, offset=offset)
+
+
+PageParams = Annotated[Pagination, Depends(pagination)]
+
+
+# --- Resource ownership -------------------------------------------------------
+#
+# These return 404 (not 403) when the caller does not own the row. A 403 would
+# confirm that the id exists and belongs to someone else, which is an
+# information leak; 404 makes "missing" and "not yours" indistinguishable.
+# Administrators may read any row, per the admin requirements in the spec.
+
+
+def _is_admin(user: User) -> bool:
+    return (user.role or "").upper() == "ADMIN"
+
+
+def get_owned_project(
+    project_id: int,
+    db: DbSession,
+    user: CurrentUser,
+) -> Project:
+    project = db.get(Project, project_id)
+    if project is None or (project.user_id != user.id and not _is_admin(user)):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        )
+    return project
+
+
+OwnedProject = Annotated[Project, Depends(get_owned_project)]
+
+
+def get_owned_video(
+    video_id: int,
+    db: DbSession,
+    user: CurrentUser,
+) -> Video:
+    video = db.get(Video, video_id)
+    if video is None or (video.user_id != user.id and not _is_admin(user)):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found.",
+        )
+    return video
+
+
+OwnedVideo = Annotated[Video, Depends(get_owned_video)]
