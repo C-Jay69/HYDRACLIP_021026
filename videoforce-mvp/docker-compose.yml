@@ -55,8 +55,16 @@ services:
       retries: 5
 
   api:
-    build: ./apps/api
-    environment:
+    build:
+      # The Dockerfile COPYs `apps/` and `seed.py`, which live here, not in
+      # apps/api. With `build: ./apps/api` the context was apps/api itself and
+      # every COPY resolved to a non-existent path.
+      context: .
+      dockerfile: apps/api/Dockerfile
+    # Anchored so worker and beat inherit exactly the same configuration;
+    # a worker with different settings to the API is a classic source of
+    # "works in the API, fails in the job" bugs.
+    environment: &api_env
       - DATABASE_URL=postgresql://videoforce:${POSTGRES_PASSWORD-secret}@postgres:5432/videoforce
       - REDIS_URL=redis://redis:6379/0
       - MINIO_ENDPOINT=http://minio:9000
@@ -79,6 +87,13 @@ services:
       - APP_URL=${APP_URL:-http://localhost:3000}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      # Dispatch generation to the worker fleet rather than running it inside
+      # the API process.
+      - JOB_RUNNER=${JOB_RUNNER:-celery}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=db+postgresql://videoforce:${POSTGRES_PASSWORD-secret}@postgres:5432/videoforce
+      - MEDIA_WORK_DIR=${MEDIA_WORK_DIR:-/tmp/videoforce}
+      - JOB_TIMEOUT_SECONDS=${JOB_TIMEOUT_SECONDS:-900}
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,21 +104,65 @@ services:
     ports:
       - "8000:8000"
 
-  # The Celery worker service was removed: the service name contained a
-  # "/" (illegal in Compose), it built ./apps/worker which does not exist,
-  # and it published port 5555, colliding with flower below. Reinstate it
-  # once apps/worker exists.
+  # Worker and beat run the API image with a different command: identical
+  # code and dependencies, built once. The original service was removed in an
+  # earlier pass because its name contained a "/" (illegal in Compose), it
+  # built ./apps/worker which did not exist, and it published 5555, colliding
+  # with flower.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: >
+      celery -A apps.worker.celery_app:celery_app worker
+      --loglevel=info
+      --concurrency=${WORKER_CONCURRENCY:-2}
+      -Q generation,maintenance
+    environment: *api_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A apps.worker.celery_app:celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  beat:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    # --schedule must live on a writable path; the image runs as non-root.
+    command: >
+      celery -A apps.worker.celery_app:celery_app beat
+      --loglevel=info
+      --schedule=/tmp/celerybeat-schedule
+    environment: *api_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 
   flower:
     image: celery/flower:latest
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=postgresql://videoforce:${POSTGRES_PASSWORD-secret}@postgres:5432/videoforce
+      # Celery reads the URL scheme as a *backend module* name: a bare
+      # "postgresql://" raises ModuleNotFoundError. The SQLAlchemy backend
+      # needs the "db+" prefix.
+      - CELERY_RESULT_BACKEND=db+postgresql://videoforce:${POSTGRES_PASSWORD-secret}@postgres:5432/videoforce
     depends_on:
-      api:
-        condition: service_healthy
       redis:
         condition: service_healthy
+      worker:
+        condition: service_started
     ports:
       - "5555:5555"
 

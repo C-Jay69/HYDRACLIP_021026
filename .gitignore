@@ -43,3 +43,9 @@ venv
 # local sqlite scratch databases
 *.db
 *.sqlite3
+
+# Celery runtime artefacts
+celerybeat-schedule*
+celerybeat.pid
+# kombu's filesystem transport spools messages into ./control
+control/

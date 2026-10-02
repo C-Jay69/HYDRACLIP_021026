@@ -1,0 +1,10 @@
+# Build context is videoforce-mvp (see docker-compose.yml). A .dockerignore
+# in apps/api/ would never be read.
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+.venv
+venv
+*.md
+tests
+.git

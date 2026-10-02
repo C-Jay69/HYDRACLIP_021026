@@ -55,6 +55,10 @@ class VideoJobPublic(BaseModel):
     video_id: int
     job_type: str
     status: str
+    celery_task_id: str | None = Field(
+        default=None,
+        description="Worker task id, for correlating a stuck job with flower.",
+    )
     progress_pct: int = 0
     error_message: str | None = None
 

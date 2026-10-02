@@ -26,3 +26,9 @@ PyJWT==2.10.1
 
 # HTTP client (Shutterstock + Ollama integrations)
 httpx==0.28.1
+
+# Background jobs. docker-compose.yml has always run a flower container
+# against a Celery broker, but nothing declared Celery as a dependency
+# and apps/worker did not exist.
+celery[redis]==5.4.0
+redis==5.2.1

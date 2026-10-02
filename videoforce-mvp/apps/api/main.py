@@ -43,26 +43,42 @@ def create_app() -> FastAPI:
         return {"status": "healthy", "service": "videoforce-api"}
 
     @app.get("/readyz", tags=["system"])
-    def readiness_check() -> dict[str, str]:
-        """Readiness probe — verifies the database is reachable."""
+    def readiness_check() -> dict[str, object]:
+        """Readiness probe — verifies the database and the job queue."""
         from sqlalchemy import text
 
         from apps.api.core.db import engine
+        from apps.api.services.task_queue import queue_health
 
+        database = "ok"
         try:
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Readiness check failed: %s", exc)
-            return {"status": "degraded", "database": "unreachable"}
+            database = "unreachable"
 
-        return {"status": "ready", "database": "ok"}
+        queue = queue_health()
+        healthy = database == "ok" and queue.get("ok", False)
+
+        return {
+            "status": "ready" if healthy else "degraded",
+            "database": database,
+            "queue": queue,
+        }
 
     app.include_router(auth.router)
     app.include_router(projects.router)
     app.include_router(videos.router)
     app.include_router(generation.router)
     app.include_router(shutterstock.router)
+
+    # Chooses between the in-process runner and Celery. Done at app creation
+    # so the choice (and the warning for "inline") is visible in the logs at
+    # boot rather than on the first generation request.
+    from apps.api.services.task_queue import configure_job_runner
+
+    configure_job_runner()
 
     return app
 

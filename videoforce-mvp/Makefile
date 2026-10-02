@@ -1,5 +1,5 @@
 .PHONY: help setup up down logs ps migrate revision seed model test lint shell-api shell-db \
-        venv install dev clean
+        venv install dev clean worker beat flower stack
 
 # The previous Makefile drove Python tooling through Bun
 # (`bun run --cwd apps/api alembic upgrade head`, `bun run --cwd apps/api bash`),
@@ -75,6 +75,23 @@ migrate-local: ## Apply migrations against DATABASE_URL on the host
 
 seed-local: ## Seed the database on the host
 	$(PY) seed.py
+
+worker: ## Run a Celery worker locally (needs a broker; see REDIS_URL)
+	$(VENV)/bin/celery -A apps.worker.celery_app:celery_app worker \
+		--loglevel=info --concurrency=2 -Q generation,maintenance
+
+beat: ## Run the Celery beat scheduler locally
+	$(VENV)/bin/celery -A apps.worker.celery_app:celery_app beat \
+		--loglevel=info --schedule=/tmp/celerybeat-schedule
+
+flower: ## Inspect the queue (http://localhost:5555)
+	$(VENV)/bin/celery -A apps.worker.celery_app:celery_app flower --port=5555
+
+stack: ## Remind how to run API + worker + beat together
+	@echo "Run each in its own shell, with JOB_RUNNER=celery set:"
+	@echo "  make dev"
+	@echo "  make worker"
+	@echo "  make beat"
 
 clean: ## Remove caches and build artefacts
 	find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true

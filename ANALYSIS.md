@@ -151,7 +151,7 @@ Severity: 🔴 breaks the page · 🟠 broken behaviour · 🟡 correctness / qu
 | 35 | 🟡 | 7 `.pyc` files committed; `__pycache__` not gitignored | **Fixed** — untracked + ignored |
 | 36 | 🟡 | Both `bun.lock` and `package-lock.json` committed | **Flagged** — see §5 |
 
-### Backend (`videoforce-mvp`) — Phases 0–3 now complete
+### Backend (`videoforce-mvp`) — Phases 0–4 now complete
 
 > Addressed in a follow-up pass. See [§6 Backend progress](#6-backend-progress) for
 > what was built and what remains.
@@ -451,16 +451,83 @@ The pipeline's entry point had never once returned successfully.
   restart. `jobs.set_runner()` is the seam Phase 4 replaces with Celery —
   the router and the state machine do not change.
 
+### Phase 4 — Celery worker and scheduler
+
+`docker-compose.yml` had run a **flower** container against a Celery broker
+from the start. There was no Celery app, no `apps/worker` package, and Celery
+was not even declared as a dependency — flower had nothing to monitor.
+
+**What was added**
+
+| Component | Purpose |
+|---|---|
+| `apps/worker/celery_app.py` | the Celery application, queues, routes and beat schedule |
+| `apps/worker/tasks.py` | four tasks, all thin wrappers over `apps.api.services` |
+| `apps/api/services/task_queue.py` | runner selection, dispatch, broker health |
+| `apps/api/services/maintenance.py` | reaper / sweeper / schedule-claim logic |
+
+**Compose bugs found while wiring it up**
+
+| Bug | Consequence |
+|---|---|
+| `api: build: ./apps/api` while the Dockerfile `COPY`s `apps/` and `seed.py` | every `COPY` resolved to a non-existent path — `docker compose build` could only fail |
+| `.dockerignore` sat in `apps/api/` | a `.dockerignore` is only read at the build-context root, so it was ignored entirely |
+| `CELERY_RESULT_BACKEND=postgresql://…` on flower | Celery reads the scheme as a backend *module* name; a bare `postgresql://` raises `ModuleNotFoundError`. The SQLAlchemy backend needs `db+postgresql://`. Confirmed by constructing both |
+
+One thing that looked broken but is not: flower's `depends_on: api: condition:
+service_healthy` is satisfied by the `HEALTHCHECK` in the API Dockerfile — a
+compose-level `healthcheck:` block is not required. It now waits on the worker
+instead, which is the service it actually needs.
+
+**Decisions worth recording**
+
+- **Worker and beat run the API image with a different command.** Identical
+  code and dependencies, built once. A worker whose settings have drifted from
+  the API is a classic source of "works in the request, fails in the job", so
+  the compose environment is a YAML anchor shared by all three services.
+- **The seam Phase 3 left is what got used.** `jobs.set_runner()` is called at
+  app creation by `configure_job_runner()`; neither the router nor the job
+  state machine changed. `JOB_RUNNER=inline` remains the default so the stack
+  still runs without a broker, and it logs a warning explaining that in-flight
+  work is lost on restart.
+- **Dispatch is by task name via `send_task`.** The API never imports
+  `apps.worker.tasks`, so queueing a job does not pull the pipeline, ffmpeg
+  bindings or model loaders into the web process.
+- **`task_acks_late` + `task_reject_on_worker_lost` + `prefetch_multiplier=1`.**
+  Without late acks a worker crash loses the job silently; with prefetching one
+  worker hoards long renders while its peers idle.
+- **Maintenance is routed to its own queue** so housekeeping never queues
+  behind a fifteen-minute render.
+- **A broker that is down returns 503**, rather than leaving a job row no
+  worker will ever see. `/readyz` now reports queue reachability alongside the
+  database.
+- **`celery_task_id` is recorded and exposed** on the job, so a stuck job can
+  be correlated with what flower shows.
+
+**Periodic tasks (celery beat)**
+
+- `reap_stale_jobs` — fails jobs stuck `running` past `JOB_TIMEOUT_SECONDS`
+  (the worker died) and jobs stuck `pending` past a grace period (the dispatch
+  never arrived). Both cases otherwise hold one of the user's three monthly
+  quota slots **forever**; reaping releases the slot without charging for it.
+- `sweep_work_dir` — deletes render artefacts past their TTL. Nothing had ever
+  cleaned them up.
+- `dispatch_due_schedules` — claims due rows from the `schedules` table with a
+  guarded `UPDATE`, so two overlapping ticks cannot publish the same post
+  twice. Publishing itself needs platform OAuth, which is the next phase.
+
 ### Verification
 
 ```bash
 cd videoforce-mvp
 make install      # creates .venv, installs pinned deps
-make test         # 184 tests
+make test         # 223 tests
+make worker       # celery worker
+make beat         # celery beat
 make dev          # uvicorn on :8000, /docs for the API explorer
 ```
 
-184 tests pass (126 through Phase 2, 58 added in Phase 3). The flow was also
+223 tests pass (184 through Phase 3, 39 added in Phase 4). The flow was also
 exercised over real HTTP against a running uvicorn process with two separate
 accounts: signup, project create/list/patch/delete, pagination, quota, and — for
 every mutating route — a confirmation that the second user gets a 404
@@ -475,13 +542,29 @@ quota moved from 0 to 1 used. Exhausting the free plan then returned 402, a
 fourth concurrent project was refused, and a second account got identical 404s
 for the first account's job.
 
+Phase 4 was verified against a **real Celery worker**, not mocks. Docker and
+Redis are unavailable in the development sandbox, so the broker was kombu's
+filesystem transport: a genuine worker process, genuine message passing. With
+`JOB_RUNNER=celery` the API returned 202, the worker picked the task off the
+`generation` queue, the job reached `completed` at 100%, and `celery_task_id`
+was recorded on the row. A beat process then drove all three periodic tasks on
+short intervals: a wedged `running` job and an unclaimed `pending` job were both
+reaped (releasing two quota slots) while a healthy job was untouched, a stale
+artefact was swept while a fresh one survived, and a due schedule was claimed
+exactly once — every later tick returned `{'claimed': []}`.
+
+The compose stack itself is still unproven because Docker is unavailable here.
+`docker-compose.yml` now parses cleanly and the worker's environment is
+asserted identical to the API's, but `make setup && make up` needs running on
+a machine with Docker.
+
 ### Still outstanding
 
 | Phase | Work |
 |---|---|
-| 4 | Celery worker + scheduler — `apps/worker` still does not exist; flower is idle until it does. Swap `jobs.set_runner()` to dispatch through Celery |
+| 5 | Platform OAuth and publishing for YouTube / Instagram / TikTok / X. `dispatch_due_schedules` claims due rows but stops there |
 | — | Video assembly itself: download stock media, mux with the voiceover, watermark. `create_video_from_script` raises `StageNotImplemented` until this exists |
-| 5 | Platform OAuth and publishing for YouTube / Instagram / TikTok / X |
+| — | Scheduling API: the `schedules` table has no endpoints, so nothing can create a row for beat to claim |
 | — | Email verification and password reset (SMTP settings exist, no code) |
 | — | Stripe billing (tables and keys exist, no code) |
 | — | Token deny-list on logout once Redis is wired up |

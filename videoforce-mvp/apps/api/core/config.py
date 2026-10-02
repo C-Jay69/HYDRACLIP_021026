@@ -85,6 +85,41 @@ class Settings(BaseSettings):
     #: Wall-clock ceiling for one generation job.
     JOB_TIMEOUT_SECONDS: float = 900.0
 
+    # --- Background execution ------------------------------------------------
+    #: "inline" runs jobs as asyncio tasks inside the API process (dev only;
+    #: work is lost on restart). "celery" dispatches to the worker fleet.
+    JOB_RUNNER: Literal["inline", "celery"] = "inline"
+
+    #: Both default to REDIS_URL when left blank, so a single setting is
+    #: enough for the common deployment.
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+    #: Beat intervals, in seconds.
+    STALE_JOB_SWEEP_SECONDS: float = 300.0
+    WORK_DIR_SWEEP_SECONDS: float = 3600.0
+    SCHEDULE_TICK_SECONDS: float = 60.0
+
+    #: Delete work-directory artefacts older than this.
+    WORK_DIR_TTL_SECONDS: float = 86_400.0
+
+    @property
+    def celery_broker_url(self) -> str:
+        return self.CELERY_BROKER_URL or self.REDIS_URL
+
+    @property
+    def celery_result_backend(self) -> str:
+        """Celery reads the URL scheme as a backend *module* name.
+
+        A bare "postgresql://" raises ModuleNotFoundError: the SQLAlchemy
+        backend needs the "db+" prefix. Normalise it here so a plain database
+        URL in the environment cannot take the worker down.
+        """
+        backend = self.CELERY_RESULT_BACKEND or self.REDIS_URL
+        if backend.startswith(("postgresql://", "postgres://", "sqlite://", "mysql://")):
+            return f"db+{backend}"
+        return backend
+
     # --- Application URLs ---------------------------------------------------
     APP_URL: str = "http://localhost:3000"
     NEXT_PUBLIC_APP_URL: str = "http://localhost:3000"
