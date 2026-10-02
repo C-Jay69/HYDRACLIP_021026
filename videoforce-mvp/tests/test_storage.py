@@ -14,6 +14,7 @@ MinIO and S3 both enforce the signature.
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 from pathlib import Path
@@ -21,7 +22,7 @@ from pathlib import Path
 import pytest
 import requests
 
-from apps.api.core.config import settings
+from apps.api.core.config import Settings, settings
 from apps.api.services import storage as storage_service
 from apps.api.services.storage import (
     ObjectStorage,
@@ -92,13 +93,62 @@ def test_storage_is_off_by_default(monkeypatch):
 
 
 def test_missing_credentials_are_named(monkeypatch):
+    """Both spellings are quoted, so the name you used is the name you see."""
     monkeypatch.setattr(settings, "STORAGE_BACKEND", "s3")
     monkeypatch.setattr(settings, "MINIO_ACCESS_KEY", "")
     instance = ObjectStorage()
 
     reason = instance.configuration_error()
     assert reason is not None
+    assert "S3_ACCESS_KEY" in reason
     assert "MINIO_ACCESS_KEY" in reason
+
+
+class TestCredentialAliases:
+    """S3_* is the preferred spelling; MINIO_* predates this being a
+    generic S3 client. Both must reach the same field, or a correct-looking
+    .env silently falls back to the MinIO defaults."""
+
+    def _settings(self, monkeypatch, **env):
+        for key in list(os.environ):
+            if key.startswith(("S3_", "MINIO_", "SUPABASE_")):
+                monkeypatch.delenv(key, raising=False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        return Settings(_env_file=None)
+
+    def test_legacy_minio_names_still_work(self, monkeypatch):
+        assert self._settings(monkeypatch, MINIO_BUCKET="legacy").MINIO_BUCKET == "legacy"
+
+    def test_s3_names_work(self, monkeypatch):
+        got = self._settings(
+            monkeypatch,
+            S3_ENDPOINT="https://x.example/s3",
+            S3_ACCESS_KEY="ak",
+            S3_SECRET_KEY="sk",
+            S3_BUCKET="b",
+        )
+        assert got.MINIO_ENDPOINT == "https://x.example/s3"
+        assert got.MINIO_ACCESS_KEY == "ak"
+        assert got.MINIO_SECRET_KEY == "sk"
+        assert got.MINIO_BUCKET == "b"
+
+    def test_supabase_bucket_name_works(self, monkeypatch):
+        """Supabase's dashboard calls it a storage bucket, so accept that."""
+        got = self._settings(monkeypatch, SUPABASE_STORAGE_BUCKET="hydrapost-assets")
+        assert got.MINIO_BUCKET == "hydrapost-assets"
+
+    def test_s3_wins_when_both_are_set(self, monkeypatch):
+        got = self._settings(monkeypatch, S3_BUCKET="new", MINIO_BUCKET="old")
+        assert got.MINIO_BUCKET == "new"
+
+    def test_region_and_path_style_are_not_shadowed(self, monkeypatch):
+        """S3_REGION and S3_FORCE_PATH_STYLE are their own fields, not
+        aliases -- an overlapping prefix must not capture them."""
+        got = self._settings(monkeypatch, S3_REGION="eu-central-1",
+                             S3_FORCE_PATH_STYLE="false")
+        assert got.S3_REGION == "eu-central-1"
+        assert got.S3_FORCE_PATH_STYLE is False
 
 
 def test_operations_refuse_when_disabled(monkeypatch, tmp_path):

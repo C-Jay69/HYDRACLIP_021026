@@ -136,13 +136,16 @@ class ObjectStorage:
                 "object storage is off (STORAGE_BACKEND=local), so rendered "
                 "files stay on the worker's local disk"
             )
+        # Named with the preferred S3_* spelling and the legacy MINIO_* one,
+        # because either sets the value and quoting only one sends people
+        # looking for a variable they already have under the other name.
         missing = [
             name
             for name, value in (
-                ("MINIO_ENDPOINT", settings.MINIO_ENDPOINT),
-                ("MINIO_ACCESS_KEY", settings.MINIO_ACCESS_KEY),
-                ("MINIO_SECRET_KEY", settings.MINIO_SECRET_KEY),
-                ("MINIO_BUCKET", settings.MINIO_BUCKET),
+                ("S3_ENDPOINT (or MINIO_ENDPOINT)", settings.MINIO_ENDPOINT),
+                ("S3_ACCESS_KEY (or MINIO_ACCESS_KEY)", settings.MINIO_ACCESS_KEY),
+                ("S3_SECRET_KEY (or MINIO_SECRET_KEY)", settings.MINIO_SECRET_KEY),
+                ("S3_BUCKET (or MINIO_BUCKET)", settings.MINIO_BUCKET),
             )
             if not value
         ]

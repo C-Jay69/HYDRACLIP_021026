@@ -21,7 +21,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # videoforce-mvp/apps/api/core/config.py -> parents[3] == videoforce-mvp/
@@ -50,10 +50,29 @@ class Settings(BaseSettings):
     # --- Object storage -----------------------------------------------------
     # These are plain S3 settings despite the MinIO names: they work
     # unchanged against AWS S3, Cloudflare R2, Backblaze B2 or Spaces.
-    MINIO_ENDPOINT: str = "http://localhost:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
-    MINIO_BUCKET: str = "videoforce"
+    # The MINIO_* names predate this being a generic S3 client: the backend
+    # is equally happy with AWS S3, Cloudflare R2, Spaces or Supabase
+    # Storage, and "MINIO_ENDPOINT=https://xyz.supabase.co/..." reads like a
+    # mistake. Both spellings are accepted; S3_* is the one to prefer.
+    # Attribute names stay MINIO_* so existing code and compose keep working.
+    MINIO_ENDPOINT: str = Field(
+        default="http://localhost:9000",
+        validation_alias=AliasChoices("S3_ENDPOINT", "MINIO_ENDPOINT"),
+    )
+    MINIO_ACCESS_KEY: str = Field(
+        default="minioadmin",
+        validation_alias=AliasChoices("S3_ACCESS_KEY", "MINIO_ACCESS_KEY"),
+    )
+    MINIO_SECRET_KEY: str = Field(
+        default="minioadmin",
+        validation_alias=AliasChoices("S3_SECRET_KEY", "MINIO_SECRET_KEY"),
+    )
+    MINIO_BUCKET: str = Field(
+        default="videoforce",
+        validation_alias=AliasChoices(
+            "S3_BUCKET", "MINIO_BUCKET", "SUPABASE_STORAGE_BUCKET"
+        ),
+    )
 
     #: "local" keeps rendered files on disk; "s3" uploads them to the bucket
     #: above. Default local, so a fresh checkout works with no object store
