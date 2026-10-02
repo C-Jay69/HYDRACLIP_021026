@@ -73,6 +73,9 @@ class QuotaStatus(BaseModel):
     plan_name: str
     limit_monthly: int = Field(description="0 means unlimited.")
     used: int
+    in_flight: int = Field(
+        default=0, description="Accepted generations still running; these hold a slot."
+    )
     remaining: int | None = Field(description="null when the plan is unlimited.")
     unlimited: bool
     period_start: datetime

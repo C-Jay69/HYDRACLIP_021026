@@ -151,7 +151,7 @@ Severity: 🔴 breaks the page · 🟠 broken behaviour · 🟡 correctness / qu
 | 35 | 🟡 | 7 `.pyc` files committed; `__pycache__` not gitignored | **Fixed** — untracked + ignored |
 | 36 | 🟡 | Both `bun.lock` and `package-lock.json` committed | **Flagged** — see §5 |
 
-### Backend (`videoforce-mvp`) — Phases 0–2 now complete
+### Backend (`videoforce-mvp`) — Phases 0–3 now complete
 
 > Addressed in a follow-up pass. See [§6 Backend progress](#6-backend-progress) for
 > what was built and what remains.
@@ -382,27 +382,105 @@ search. It is now 20, and a user can actually own something.
 `services/quota.py` and its 402 gate are written and tested now precisely because
 Phase 3 depends on them.
 
+### Phase 3 — the AI pipeline, wired to a job endpoint
+
+`services/ai_pipeline.py` was 505 lines with **no caller anywhere in the
+codebase**, and it could not have worked if there had been one.
+
+**Why it had never run**
+
+`generate_script` ended with:
+
+```python
+"generated_at": subprocess.list2cmdline.__self__ if hasattr else "unknown",
+```
+
+`list2cmdline` is a plain function with no `__self__`, and the bare `hasattr`
+builtin is always truthy so the `"unknown"` branch was unreachable. Every call
+raised `AttributeError` on the way out — verified with a healthy LLM mocked in.
+The pipeline's entry point had never once returned successfully.
+
+**Other defects fixed**
+
+| Defect | Consequence |
+|---|---|
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `WHISPER_MODEL_SIZE`, `PIPER_MODEL_PATH` all hardcoded | point a deployment at a real Ollama host and it still called `localhost` |
+| `WhisperSTT._load_model()` called from `__init__` | constructing the singleton pulled a multi-hundred-MB model into memory |
+| `httpx.AsyncClient` built in `__init__` | bound the client to whichever event loop happened to be current |
+| TTS wrote to a fixed `/tmp/tts_output.wav` | concurrent jobs overwrote each other's audio |
+| `f"/tmp/video_{topic}.mp4"` with the user's topic interpolated raw | path traversal — a topic of `../../etc/...` escaped `/tmp` |
+| `create_video_from_script` returned `{"status": "generated"}` without writing a file | the API would have reported videos that did not exist |
+| `/api/embeddings` sent `input` | that key belongs to the newer `/api/embed`; embeddings came back empty |
+| dead `from apps.api.core.config import settings` inside a method | masked the fact that settings were never used |
+
+**Endpoints added**
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/projects/{id}/generate` | 202 with a job to poll |
+| `GET` | `/jobs/{id}` | status, progress, error |
+| `POST` | `/jobs/{id}/cancel` | fulfils the "cancel the job first" message Phase 2 already returned |
+| `GET` | `/pipeline/status` | which stages this deployment can actually run |
+
+**Decisions worth recording**
+
+- **Stages are explicit — `script`, `voiceover`, `assemble` — and the default is
+  `["script"]` alone.** That is the only stage this codebase can finish without
+  extra tooling: voiceover needs the Piper binary plus a voice model, and
+  assembly is genuinely not implemented. Defaulting to all three would mean
+  every default request failed.
+- **Assembly raises rather than pretending.** `StageNotImplemented` is reported
+  on the job with the stage name, instead of marking a video "completed" when
+  nothing was rendered.
+- **Preflight runs before the job is accepted.** If Ollama is unreachable or
+  Piper is missing, the request gets 503 naming the stage and the reason, and
+  no rows are created — rather than a queued job that is certain to fail.
+- **Quota is charged on success only**, so a crashed render does not bill the
+  user. In-flight jobs hold a reservation (`in_flight` on `/videos/quota`) so
+  that N concurrent requests cannot each see the same free slot; the
+  reservation is released when a job fails or is cancelled.
+- **One generation per project at a time** — a double-clicked button returns
+  409 instead of creating two videos.
+- **Cancellation is cooperative.** Stages shell out to external binaries and
+  cannot be preempted, so a cancel lands at the next stage boundary. Every
+  status transition is a conditional `UPDATE ... WHERE status = expected`, so a
+  cancel racing a finishing stage cannot be silently overwritten.
+- **The runner is swappable.** Jobs currently execute as asyncio tasks in the
+  API process, which is fine for development and wrong for production: the work
+  shares a process with request handling and anything in flight is lost on
+  restart. `jobs.set_runner()` is the seam Phase 4 replaces with Celery —
+  the router and the state machine do not change.
+
 ### Verification
 
 ```bash
 cd videoforce-mvp
 make install      # creates .venv, installs pinned deps
-make test         # 126 tests
+make test         # 184 tests
 make dev          # uvicorn on :8000, /docs for the API explorer
 ```
 
-126 tests pass (61 from Phase 1, 65 added in Phase 2). The flow was also exercised
-over real HTTP against a running uvicorn process with two separate accounts:
-signup, project create/list/patch/delete, pagination, quota, and — for every
-mutating route — a confirmation that the second user gets a 404 indistinguishable
-from a genuinely missing id, and that the row survives the attempt.
+184 tests pass (126 through Phase 2, 58 added in Phase 3). The flow was also
+exercised over real HTTP against a running uvicorn process with two separate
+accounts: signup, project create/list/patch/delete, pagination, quota, and — for
+every mutating route — a confirmation that the second user gets a 404
+indistinguishable from a genuinely missing id, and that the row survives.
+
+Phase 3 was verified end-to-end both ways. With nothing installed,
+`/pipeline/status` reported all three stages unavailable with specific reasons
+and `POST /generate` returned 503 without creating rows. Pointed at a minimal
+Ollama-compatible stub on :11434, the same request returned 202 and the job
+reached `completed` at 100% with the generated script stored on the video, and
+quota moved from 0 to 1 used. Exhausting the free plan then returned 402, a
+fourth concurrent project was refused, and a second account got identical 404s
+for the first account's job.
 
 ### Still outstanding
 
 | Phase | Work |
 |---|---|
-| 3 | Wire `AIPipeline` (already 505 lines) to a job endpoint |
-| 4 | Celery worker + scheduler — `apps/worker` still does not exist; flower is idle until it does |
+| 4 | Celery worker + scheduler — `apps/worker` still does not exist; flower is idle until it does. Swap `jobs.set_runner()` to dispatch through Celery |
+| — | Video assembly itself: download stock media, mux with the voiceover, watermark. `create_video_from_script` raises `StageNotImplemented` until this exists |
 | 5 | Platform OAuth and publishing for YouTube / Instagram / TikTok / X |
 | — | Email verification and password reset (SMTP settings exist, no code) |
 | — | Stripe billing (tables and keys exist, no code) |

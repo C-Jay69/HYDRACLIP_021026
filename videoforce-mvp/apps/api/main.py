@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.core.config import settings
-from apps.api.routers import auth, projects, shutterstock, videos
+from apps.api.routers import auth, generation, projects, shutterstock, videos
 
 logger = logging.getLogger("videoforce.api")
 
@@ -61,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(projects.router)
     app.include_router(videos.router)
+    app.include_router(generation.router)
     app.include_router(shutterstock.router)
 
     return app

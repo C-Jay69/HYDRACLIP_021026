@@ -75,8 +75,15 @@ class Settings(BaseSettings):
     # --- Local AI models ----------------------------------------------------
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.2"
+    OLLAMA_TIMEOUT_SECONDS: float = 120.0
     PIPER_MODEL_PATH: str = "/models/piper"
     WHISPER_MODEL_SIZE: str = "base"
+    TTS_TIMEOUT_SECONDS: float = 120.0
+
+    #: Scratch space for intermediate render artefacts.
+    MEDIA_WORK_DIR: str = "/tmp/videoforce"
+    #: Wall-clock ceiling for one generation job.
+    JOB_TIMEOUT_SECONDS: float = 900.0
 
     # --- Application URLs ---------------------------------------------------
     APP_URL: str = "http://localhost:3000"

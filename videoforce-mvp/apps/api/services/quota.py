@@ -37,6 +37,15 @@ class Quota:
     used: int
     period_start: datetime
     period_end: datetime
+    #: Generation jobs already accepted but not finished. Counted against the
+    #: allowance so that N concurrent requests cannot each see the same free
+    #: slot and all pass the gate; the reservation is released if a job fails.
+    in_flight: int = 0
+
+    @property
+    def committed(self) -> int:
+        """Allowance consumed or reserved."""
+        return self.used + self.in_flight
 
     @property
     def unlimited(self) -> bool:
@@ -46,11 +55,11 @@ class Quota:
     def remaining(self) -> int | None:
         if self.unlimited:
             return None
-        return max(0, self.limit_monthly - self.used)
+        return max(0, self.limit_monthly - self.committed)
 
     @property
     def exhausted(self) -> bool:
-        return not self.unlimited and self.used >= self.limit_monthly
+        return not self.unlimited and self.committed >= self.limit_monthly
 
 
 def _utcnow() -> datetime:
@@ -112,12 +121,17 @@ def get_quota(db: Session, user_id: int) -> Quota:
         )
     )
 
+    # Imported here: services.jobs imports this module, so a module-level
+    # import would be circular.
+    from apps.api.services.jobs import count_active_jobs
+
     return Quota(
         plan_name=plan_name,
         limit_monthly=limit,
         used=int(used or 0),
         period_start=period_start,
         period_end=period_end,
+        in_flight=count_active_jobs(db, user_id),
     )
 
 
@@ -130,7 +144,9 @@ def assert_quota_available(db: Session, user_id: int) -> Quota:
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=(
                 f"Monthly video limit reached for the {quota.plan_name} plan "
-                f"({quota.used}/{quota.limit_monthly}). Upgrade to continue."
+                f"({quota.committed}/{quota.limit_monthly}"
+                + (f", {quota.in_flight} generating" if quota.in_flight else "")
+                + "). Upgrade to continue."
             ),
         )
 

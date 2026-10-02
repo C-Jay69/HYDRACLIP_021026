@@ -10,6 +10,12 @@ from apps.api.schemas.auth import (
     TokenPair,
 )
 from apps.api.schemas.common import Message, Page
+from apps.api.schemas.job import (
+    GenerationAccepted,
+    GenerationRequest,
+    PipelineStatus,
+    StageInfo,
+)
 from apps.api.schemas.project import (
     ProjectCreate,
     ProjectPublic,
@@ -25,9 +31,12 @@ from apps.api.schemas.video import (
 )
 
 __all__ = [
+    "GenerationAccepted",
+    "GenerationRequest",
     "LoginRequest",
     "Message",
     "Page",
+    "PipelineStatus",
     "ProjectCreate",
     "ProjectPublic",
     "ProjectUpdate",
@@ -35,6 +44,7 @@ __all__ = [
     "QuotaStatus",
     "RefreshRequest",
     "SignupRequest",
+    "StageInfo",
     "TokenPair",
     "UserPublic",
     "UserUpdate",

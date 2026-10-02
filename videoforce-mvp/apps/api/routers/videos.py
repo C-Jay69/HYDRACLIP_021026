@@ -77,6 +77,7 @@ def read_quota(db: DbSession, user: CurrentUser) -> QuotaStatus:
         plan_name=q.plan_name,
         limit_monthly=q.limit_monthly,
         used=q.used,
+        in_flight=q.in_flight,
         remaining=q.remaining,
         unlimited=q.unlimited,
         period_start=q.period_start,

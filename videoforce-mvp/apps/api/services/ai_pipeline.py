@@ -1,18 +1,68 @@
-import subprocess
-import json
+"""Local-first AI pipeline: Ollama (LLM), Piper (TTS), Whisper (STT), FFmpeg.
+
+Nothing in this module was reachable before: no caller existed anywhere in the
+codebase, and ``generate_script`` raised ``AttributeError`` on its own return
+statement, so the pipeline had never run even once. See ANALYSIS.md §6.
+"""
+
 import asyncio
+import json
+import shutil
+import subprocess
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
 import httpx
+
+from apps.api.core.config import settings
+
+# Scratch space for intermediate artefacts. Each run gets a unique filename:
+# the previous fixed paths meant two concurrent jobs overwrote each other.
+WORK_DIR = Path(settings.MEDIA_WORK_DIR)
+
+
+class PipelineError(RuntimeError):
+    """Base class for pipeline failures that are expected and reportable."""
+
+
+class StageUnavailable(PipelineError):
+    """A stage cannot run because its external tooling is missing."""
+
+
+class StageNotImplemented(PipelineError):
+    """A stage is declared but has no implementation yet."""
+
+
+def _work_path(suffix: str, prefix: str = "vf") -> str:
+    """A collision-free path inside the work directory."""
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    return str(WORK_DIR / f"{prefix}_{uuid.uuid4().hex}{suffix}")
 
 
 class OllamaLLM:
     """Local LLM client using Ollama."""
 
     def __init__(self, base_url: str = None, model: str = None):
-        self.base_url = base_url or "http://localhost:11434"
-        self.model = model or "llama3.2"
-        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=60.0)
+        # Previously hardcoded, so OLLAMA_BASE_URL / OLLAMA_MODEL were ignored
+        # and a deployment pointed at a real Ollama host still called localhost.
+        self.base_url = base_url or settings.OLLAMA_BASE_URL
+        self.model = model or settings.OLLAMA_MODEL
+        self.timeout = settings.OLLAMA_TIMEOUT_SECONDS
+        self._client: Optional[httpx.AsyncClient] = None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Created on first use.
+
+        Building an AsyncClient in __init__ binds it to whichever event loop
+        happens to be current at construction time; this class is held in a
+        module-level singleton, so that loop is usually the wrong one.
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        return self._client
 
     async def generate(self, prompt: str, system: str = None, 
                        max_tokens: int = 500, temperature: float = 0.7) -> str:
@@ -53,6 +103,34 @@ class OllamaLLM:
         else:
             return str(result)
 
+    async def unavailable_reason(self) -> Optional[str]:
+        """Why generation would fail right now, or None if Ollama looks ready.
+
+        Checked before a job is accepted so callers get an immediate, specific
+        error instead of a queued job that is certain to fail.
+        """
+        try:
+            response = await self.client.get("/api/tags", timeout=5.0)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            return f"Ollama is unreachable at {self.base_url} ({type(exc).__name__})"
+
+        try:
+            installed = {m["name"] for m in response.json().get("models", [])}
+        except (ValueError, KeyError, TypeError):
+            return None  # Reachable but an unexpected body; let the job try.
+
+        # Ollama reports tags as "llama3.2:latest"; accept a bare-name match.
+        if installed and not any(
+            name == self.model or name.split(":")[0] == self.model.split(":")[0]
+            for name in installed
+        ):
+            return (
+                f"the model '{self.model}' is not pulled on {self.base_url} "
+                f"(available: {', '.join(sorted(installed)) or 'none'})"
+            )
+        return None
+
     async def embed(self, text: str) -> List[float]:
         """Get embeddings from Ollama.
         
@@ -62,22 +140,45 @@ class OllamaLLM:
         Returns:
             Embedding vector
         """
-        payload = {"model": self.model, "input": text}
+        # /api/embeddings takes "prompt"; "input" belongs to the newer /api/embed.
+        payload = {"model": self.model, "prompt": text}
         response = await self.client.post("/api/embeddings", json=payload)
         response.raise_for_status()
         result = response.json()
         return result.get("embedding", [])
 
     async def close(self):
-        await self.client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
 
 class PiperTTS:
     """Local TTS using Piper."""
 
-    def __init__(self, model_path: str = None):
-        self.model_path = model_path or "/models/piper/en_US-lessac-medium.onnx"
+    #: Voice name -> model filename, resolved under settings.PIPER_MODEL_PATH.
+    VOICES = {
+        "lessac": "en_US-lessac-medium.onnx",
+        "ruffalo": "en_US-ruffalo-medium.onnx",
+        "isley": "en_US-isley-medium.onnx",
+    }
+
+    def __init__(self, model_path: str = None, voice: str = "lessac"):
+        if model_path is None:
+            filename = self.VOICES.get(voice, self.VOICES["lessac"])
+            model_path = str(Path(settings.PIPER_MODEL_PATH) / filename)
+        self.model_path = model_path
         self.model = Path(self.model_path)
+
+    @classmethod
+    def unavailable_reason(cls, voice: str = "lessac") -> Optional[str]:
+        """Why synthesis would fail right now, or None if it would work."""
+        if shutil.which("piper") is None:
+            return "the 'piper' binary is not on PATH"
+        model = Path(settings.PIPER_MODEL_PATH) / cls.VOICES.get(voice, cls.VOICES["lessac"])
+        if not model.exists():
+            return f"the Piper voice model is missing at {model}"
+        return None
 
     def synthesize(self, text: str, output_path: str = None) -> str:
         """Synthesize speech from text using Piper.
@@ -92,10 +193,13 @@ class PiperTTS:
         if not self.model.exists():
             raise FileNotFoundError(f"Piper model not found at {self.model_path}")
 
+        # Was a fixed /tmp/tts_output.wav, so concurrent jobs clobbered one another.
+        output_path = output_path or _work_path(".wav", prefix="tts")
+
         cmd = [
             "piper",
             "--model", str(self.model),
-            "--output_file", output_path or "/tmp/tts_output.wav",
+            "--output_file", output_path,
         ]
 
         process = subprocess.run(
@@ -103,12 +207,13 @@ class PiperTTS:
             input=text,
             capture_output=True,
             text=True,
+            timeout=settings.TTS_TIMEOUT_SECONDS,
         )
 
         if process.returncode != 0:
-            raise RuntimeError(f"Piper TTS failed: {process.stderr}")
+            raise RuntimeError(f"Piper TTS failed: {process.stderr.strip()}")
 
-        return output_path or "/tmp/tts_output.wav"
+        return output_path
 
     async def synthesize_async(self, text: str, output_path: str = None) -> str:
         """Async version of Piper TTS."""
@@ -120,18 +225,22 @@ class PiperTTS:
 class WhisperSTT:
     """Local STT using faster-whisper."""
 
-    def __init__(self, model_size: str = "base"):
-        self.model_size = model_size
+    def __init__(self, model_size: str = None):
+        self.model_size = model_size or settings.WHISPER_MODEL_SIZE
+        # Loaded on first transcription, not here: _load_model() in __init__
+        # pulled a multi-hundred-MB model into memory just to build the object,
+        # on whatever thread happened to construct the pipeline singleton.
         self.model = None
-        self._load_model()
 
     def _load_model(self):
-        """Load the faster-whisper model."""
+        """Load the faster-whisper model, if the package is installed."""
+        if self.model is not None:
+            return
         try:
             from faster_whisper import WhisperModel
             self.model = WhisperModel(self.model_size, compute_type="auto")
         except ImportError:
-            # Fallback: use subprocess with whisper command
+            # Caller falls back to the whisper CLI.
             pass
 
     def transcribe(self, audio_path: str) -> Dict[str, Any]:
@@ -143,14 +252,9 @@ class WhisperSTT:
         Returns:
             Dict with transcription text, segments, language
         """
+        self._load_model()
         if self.model is None:
-            # Try loading on demand
-            try:
-                from faster_whisper import WhisperModel
-                self.model = WhisperModel(self.model_size, compute_type="auto")
-            except ImportError:
-                # Fallback to command-line whisper
-                return self._transcribe_cli(audio_path)
+            return self._transcribe_cli(audio_path)
 
         segments, info = self.model.transcribe(audio_path)
         
@@ -346,10 +450,10 @@ class FFmpegProcessor:
 class AIPipeline:
     """Composite AI pipeline combining LLM, TTS, STT, and FFmpeg."""
 
-    def __init__(self, 
-                 llm_model: str = "llama3.2",
+    def __init__(self,
+                 llm_model: str = None,
                  tts_model_path: str = None,
-                 stt_model_size: str = "base"):
+                 stt_model_size: str = None):
         self.llm = OllamaLLM(model=llm_model)
         self.tts = PiperTTS(model_path=tts_model_path)
         self.stt = WhisperSTT(model_size=stt_model_size)
@@ -399,7 +503,13 @@ class AIPipeline:
             "topic": topic,
             "style": style,
             "duration": duration,
-            "generated_at": subprocess.list2cmdline.__self__ if hasattr else "unknown",
+            # Was: `subprocess.list2cmdline.__self__ if hasattr else "unknown"`,
+            # which raised AttributeError on every call -- list2cmdline is a
+            # plain function with no __self__, and the bare `hasattr` builtin is
+            # always truthy so the "unknown" branch was unreachable. This single
+            # expression meant the pipeline could never return successfully.
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "model": self.llm.model,
         }
 
     async def text_to_speech(self, text: str, voice: str = "lessac") -> str:
@@ -412,20 +522,11 @@ class AIPipeline:
         Returns:
             Path to generated WAV audio file
         """
-        # Update the Piper model path based on voice
-        model_map = {
-            "lessac": "/models/piper/en_US-lessac-medium.onnx",
-            "ruffalo": "/models/piper/en_US-ruffalo-medium.onnx",
-            "isley": "/models/piper/en_US-isley-medium.onnx",
-        }
-        
-        model_path = model_map.get(voice, self.tts.model_path)
-        
-        # Reinitialize with correct model
-        from apps.api.core.config import settings
-        tts = PiperTTS(model_path=model_path)
-        audio_path = tts.synthesize(text)
-        return audio_path
+        # Voice -> model resolution lives on PiperTTS so it honours
+        # PIPER_MODEL_PATH instead of hardcoding /models/piper.
+        tts = PiperTTS(voice=voice)
+        # Synthesis shells out to a binary; keep it off the event loop.
+        return await tts.synthesize_async(text)
 
     async def speech_to_text(self, audio_path: str) -> Dict[str, Any]:
         """Convert speech to text using Whisper.
@@ -443,12 +544,16 @@ class AIPipeline:
                                        stock_media: List[Dict] = None,
                                        watermark: bool = True) -> Dict[str, Any]:
         """Create a complete video from a generated script.
-        
-        This is a high-level orchestration that:
-        1. Generates TTS audio from the script
-        2. Searches Shutterstock for relevant stock media
-        3. Combines audio + video using FFmpeg
-        4. Adds watermark if needed
+
+        Partially implemented. TTS runs; assembly does not exist yet and
+        raises StageNotImplemented rather than reporting a video that was
+        never rendered.
+
+        Intended orchestration:
+        1. Generate TTS audio from the script          (implemented)
+        2. Search Shutterstock for relevant stock media (caller-supplied)
+        3. Combine audio + video using FFmpeg           (NOT implemented)
+        4. Add watermark if needed                      (NOT implemented)
         
         Args:
             script: Script dict from generate_script()
@@ -458,36 +563,28 @@ class AIPipeline:
         Returns:
             Dict with video generation metadata and storage path
         """
-        # Step 1: Generate TTS audio
+        # Step 1: Generate TTS audio (this part is real).
         audio_path = await self.text_to_speech(script["script"])
-        
-        # Step 2: Search for stock media if not provided
+
+        # Step 2: Collect stock media URLs if the caller pre-selected any.
         video_urls = []
         if stock_media:
             video_urls = [m.get("preview_url") or m.get("url") for m in stock_media[:5]]
-        
-        # Step 3: Create video using FFmpeg
-        # For now, we'll create a basic structure
-        # In a full implementation, this would use the stock media URLs 
-        # with a video editing library
-        
-        output_path = f"/tmp/video_{script['topic'].replace(' ', '_')}.mp4"
-        
-        # This is a simplified example - real implementation would:
-        # - Download stock media videos/images
-        # - Combine with audio
-        # - Add transitions, titles, etc.
-        
-        # For now, just return the audio and metadata
-        return {
-            "audio_path": audio_path,
-            "video_urls": video_urls,
-            "script": script["script"],
-            "topic": script["topic"],
-            "output_path": output_path,
-            "status": "generated",
-            "watermark": watermark,
-        }
+
+        # Step 3: Assemble the video. Not implemented.
+        #
+        # The previous version built an output path, never wrote a file to it,
+        # and returned {"status": "generated"} regardless -- so every caller
+        # would have been told a video existed when nothing had been rendered.
+        # The path was also f"/tmp/video_{topic}.mp4" with the user-supplied
+        # topic interpolated raw, so a topic of "../../etc/x" escaped /tmp.
+        #
+        # Raising keeps the failure honest and lets the job layer record
+        # exactly which stage stopped and why.
+        raise StageNotImplemented(
+            "video assembly is not implemented: downloading stock media and "
+            "muxing it with the voiceover still needs to be built"
+        )
 
     async def close(self):
         """Close all underlying connections."""
