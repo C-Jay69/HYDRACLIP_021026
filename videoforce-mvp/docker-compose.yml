@@ -49,13 +49,11 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
     entrypoint: >
       /bin/sh -c "
       mc alias set vf http://minio:9000
       '${MINIO_ROOT_USER:-minioadmin}' '${MINIO_ROOT_PASSWORD:-minioadmin}' &&
-      mc mb --ignore-existing vf/'${MINIO_BUCKET:-videoforce}' &&
+      mc mb --ignore-existing vf/'${S3_BUCKET:-${SUPABASE_STORAGE_BUCKET:-${MINIO_BUCKET:-videoforce}}}' &&
       echo 'bucket ready'
       "
 
@@ -82,17 +80,23 @@ services:
     # a worker with different settings to the API is a classic source of
     # "works in the API, fails in the job" bugs.
     environment: &api_env
-      - DATABASE_URL=postgresql://videoforce:${POSTGRES_PASSWORD-secret}@postgres:5432/videoforce
-      - REDIS_URL=redis://redis:6379/0
+      # Honour an external DATABASE_URL (for example Supabase's IPv4 session
+      # pooler). Previously this was hard-coded to the bundled Postgres service,
+      # so a correct DATABASE_URL in .env was silently ignored by Docker.
+      - DATABASE_URL=${DATABASE_URL:-postgresql://videoforce:${POSTGRES_PASSWORD:-secret}@postgres:5432/videoforce}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       # Object storage for finished renders. Without STORAGE_BACKEND=s3 the
       # MP4 only ever exists on the worker's disk, which Instagram and
       # TikTok cannot fetch from.
       - STORAGE_BACKEND=${STORAGE_BACKEND:-s3}
-      # Internal address, used for uploads between containers.
-      - MINIO_ENDPOINT=http://minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - MINIO_BUCKET=${MINIO_BUCKET:-videoforce}
+      # Internal/upload endpoint and credentials. Resolve the preferred S3_*
+      # names (plus Supabase's bucket spelling) before falling back to the
+      # bundled MinIO service. Pydantic still receives MINIO_* here so both
+      # generations of configuration remain compatible.
+      - MINIO_ENDPOINT=${S3_ENDPOINT:-${MINIO_ENDPOINT:-http://minio:9000}}
+      - MINIO_ACCESS_KEY=${S3_ACCESS_KEY:-${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}}
+      - MINIO_SECRET_KEY=${S3_SECRET_KEY:-${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}}
+      - MINIO_BUCKET=${S3_BUCKET:-${SUPABASE_STORAGE_BUCKET:-${MINIO_BUCKET:-videoforce}}}
       - S3_REGION=${S3_REGION:-us-east-1}
       - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}
       # External address the *provider* will fetch from. The default is
@@ -106,6 +110,9 @@ services:
       # the source of truth once the upload succeeds.
       - MEDIA_RETAIN_LOCAL=${MEDIA_RETAIN_LOCAL:-false}
       - SECRET_KEY=${SECRET_KEY:-super-secret-key-change-in-production}
+      # Keep this separate from SECRET_KEY so rotating JWT credentials does
+      # not make every encrypted social-account token unreadable.
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
       - ACCESS_TOKEN_EXPIRES_IN=${ACCESS_TOKEN_EXPIRES_IN:-3600}
       - REFRESH_TOKEN_EXPIRES_IN=${REFRESH_TOKEN_EXPIRES_IN:-86400}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
@@ -134,11 +141,26 @@ services:
       - APP_URL=${APP_URL:-http://localhost:3000}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      # Social OAuth values must be explicitly forwarded: Compose uses .env
+      # for interpolation, but does not otherwise inject every .env key into
+      # the container.
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
+      - YOUTUBE_REDIRECT_URI=${YOUTUBE_REDIRECT_URI:-}
+      - INSTAGRAM_CLIENT_ID=${INSTAGRAM_CLIENT_ID:-}
+      - INSTAGRAM_CLIENT_SECRET=${INSTAGRAM_CLIENT_SECRET:-}
+      - INSTAGRAM_REDIRECT_URI=${INSTAGRAM_REDIRECT_URI:-}
+      - TIKTOK_CLIENT_ID=${TIKTOK_CLIENT_ID:-}
+      - TIKTOK_CLIENT_SECRET=${TIKTOK_CLIENT_SECRET:-}
+      - TIKTOK_REDIRECT_URI=${TIKTOK_REDIRECT_URI:-}
+      - X_CLIENT_ID=${X_CLIENT_ID:-}
+      - X_CLIENT_SECRET=${X_CLIENT_SECRET:-}
+      - X_REDIRECT_URI=${X_REDIRECT_URI:-}
       # Dispatch generation to the worker fleet rather than running it inside
       # the API process.
       - JOB_RUNNER=${JOB_RUNNER:-celery}
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=db+postgresql://videoforce:${POSTGRES_PASSWORD-secret}@postgres:5432/videoforce
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       - MEDIA_WORK_DIR=${MEDIA_WORK_DIR:-/tmp/videoforce}
       - JOB_TIMEOUT_SECONDS=${JOB_TIMEOUT_SECONDS:-900}
     depends_on:
@@ -218,11 +240,8 @@ services:
   flower:
     image: celery/flower:latest
     environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      # Celery reads the URL scheme as a *backend module* name: a bare
-      # "postgresql://" raises ModuleNotFoundError. The SQLAlchemy backend
-      # needs the "db+" prefix.
-      - CELERY_RESULT_BACKEND=db+postgresql://videoforce:${POSTGRES_PASSWORD-secret}@postgres:5432/videoforce
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
     depends_on:
       redis:
         condition: service_healthy

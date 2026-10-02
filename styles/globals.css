@@ -40,7 +40,7 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  /* Brand tokens (Videoforce violet) */
+  /* Brand tokens (HydraPost violet) */
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-bright: var(--brand-bright);
@@ -94,7 +94,7 @@
 
 .dark {
   /*
-   * Videoforce dark palette.
+   * HydraPost dark palette.
    * `muted-foreground` is deliberately lighter than the old #6b6b80, which only
    * reached 3.8:1 against the page background and failed WCAG AA for body copy.
    * #9a9ab0 reaches ~7.1:1.

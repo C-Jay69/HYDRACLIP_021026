@@ -7,7 +7,9 @@ import index from "./index.html";
  * When it is not reachable the stock endpoints fall back to sample data so the
  * UI stays usable in local development.
  */
-const API_BASE_URL = process.env.VIDEOFORCE_API_URL ?? "http://localhost:8000";
+const API_BASE_URL =
+  process.env.HYDRAPOST_API_URL ?? process.env.VIDEOFORCE_API_URL ?? "http://localhost:8000";
+const PUBLIC_LOGO_URL = new URL("../public/hydrapost_logo.png", import.meta.url);
 
 /** The frontend talks in singular media types; the FastAPI service uses plural. */
 const MEDIA_TYPE_PATHS = {
@@ -84,7 +86,15 @@ const server = serve({
     // Landing page
     "/": index,
 
-    "/api/health": () => Response.json({ status: "ok", service: "videoforce-web" }),
+    "/hydrapost_logo.png": () =>
+      new Response(Bun.file(PUBLIC_LOGO_URL), {
+        headers: {
+          "Cache-Control": "public, max-age=86400",
+          "Content-Type": "image/png",
+        },
+      }),
+
+    "/api/health": () => Response.json({ status: "ok", service: "hydrapost-web" }),
 
     /**
      * Stock media search.

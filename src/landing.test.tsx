@@ -24,8 +24,11 @@ describe("landing page renders real content", () => {
     expect(html.length).toBeGreaterThan(5000);
   });
 
-  test("renders the brand name", () => {
-    expect(html).toContain("Videoforce");
+  test("renders the HydraPost brand and uploaded logo", () => {
+    expect(html).toContain("HYDRA");
+    expect(html).toContain("POST");
+    expect(html).toContain("hydrapost-mark");
+    expect(html).toContain("hydrapost-wordmark");
   });
 
   test("renders a top-level heading", () => {

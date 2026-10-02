@@ -1,4 +1,4 @@
-import brandLogo from "../../brand-logo.svg";
+import brandWordmark from "../../assets/hydrapost-wordmark.webp";
 import { PLATFORM_LABELS, PlatformIcon, type Platform } from "./PlatformIcon";
 
 const COLUMNS = [
@@ -46,18 +46,27 @@ export function SiteFooter() {
       <div className="mx-auto max-w-7xl">
         <div className="grid grid-cols-2 gap-10 md:grid-cols-6">
           <div className="col-span-2">
-            <a href="#top" className="flex items-center gap-2.5">
-              <img src={brandLogo} alt="" aria-hidden="true" className="size-8 rounded-lg" />
-              <span className="text-lg font-bold tracking-tight">Videoforce</span>
+            <a
+              href="#top"
+              aria-label="HydraPost home"
+              className="inline-flex rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <img
+                src={brandWordmark}
+                alt="HydraPost"
+                width={1120}
+                height={220}
+                className="h-10 w-auto max-w-full object-contain object-left"
+              />
             </a>
             <p className="mt-4 max-w-xs text-sm text-muted-foreground">
               AI video content scheduling that runs on open-source models you control.
             </p>
             <a
-              href="mailto:hello@videoforce.com"
+              href="#cta"
               className="mt-4 inline-block text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
             >
-              hello@videoforce.com
+              Contact us
             </a>
           </div>
 
@@ -82,7 +91,7 @@ export function SiteFooter() {
 
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border pt-8 sm:flex-row">
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} Videoforce. All rights reserved.
+            © {new Date().getFullYear()} HydraPost. All rights reserved.
           </p>
           <ul className="flex items-center gap-2">
             {SOCIALS.map((platform) => (

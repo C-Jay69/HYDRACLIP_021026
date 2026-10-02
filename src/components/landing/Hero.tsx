@@ -21,7 +21,7 @@ export function Hero() {
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg text-pretty text-muted-foreground">
-            Videoforce writes the script, picks the footage, records the voiceover and schedules the
+            HydraPost writes the script, picks the footage, records the voiceover and schedules the
             upload — to YouTube, Instagram, TikTok and X. Everything generated locally, every clip
             properly licensed.
           </p>
@@ -60,7 +60,7 @@ export function Hero() {
           <div className="vf-float relative overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/60">
             <img
               src={heroImage}
-              alt="The Videoforce dashboard showing a publishing calendar filled with scheduled video posts alongside performance charts."
+              alt="The HydraPost dashboard showing a publishing calendar filled with scheduled video posts alongside performance charts."
               width={1600}
               height={900}
               loading="eager"
