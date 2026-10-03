@@ -1,0 +1,17 @@
+-r requirements.txt
+
+# Test tooling
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+
+# In-process S3 for the storage tests. The [server] extra provides a real
+# HTTP endpoint, which is what lets the suite fetch a presigned URL over
+# the wire instead of trusting that it would have worked.
+#
+# Note: moto pulls in joserfc, which asks for cryptography>=45 while
+# requirements.txt pins 44.0.0. pip prints a conflict warning; it is
+# harmless here because joserfc is only used by moto's Cognito support,
+# not S3. Verified: moto's S3 server runs correctly against cryptography
+# 44.0.0.
+moto[server]==5.2.3

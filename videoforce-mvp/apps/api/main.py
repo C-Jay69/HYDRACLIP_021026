@@ -1,220 +1,102 @@
-from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.responses import JSONResponse
+"""Videoforce API application factory.
+
+Changes from the previous version:
+
+* ``from .app.core.config import settings`` pointed at a package that had no
+  ``__init__.py`` chain, so the module could not be imported at all. Imports
+  are now absolute against the ``apps.api`` package.
+* Endpoints are mounted from routers instead of being declared inline.
+* CORS no longer passes ``None``/duplicate origins through to Starlette.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional, Dict, Any
-import os
 
-from .app.core.config import settings
-from .services.shutterstock import get_shutterstock_api, ShutterstockAPI
-
-# Create FastAPI app
-app = FastAPI(
-    title="Videoforce API",
-    description="AI-powered video content scheduling platform",
-    version="0.1.0",
+from apps.api.core.config import settings
+from apps.api.routers import (
+    auth,
+    generation,
+    oauth,
+    projects,
+    schedules,
+    shutterstock,
+    videos,
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.APP_URL, settings.NEXT_PUBLIC_APP_URL],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+logger = logging.getLogger("videoforce.api")
 
 
-# Health check endpoint
-@app.get("/healthz")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "videoforce-api"}
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Videoforce API",
+        description="AI-powered video content scheduling platform",
+        version="0.1.0",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/healthz", tags=["system"])
+    def health_check() -> dict[str, str]:
+        """Liveness probe."""
+        return {"status": "healthy", "service": "videoforce-api"}
+
+    @app.get("/readyz", tags=["system"])
+    def readiness_check() -> dict[str, object]:
+        """Readiness probe — verifies the database and the job queue."""
+        from sqlalchemy import text
+
+        from apps.api.core.db import engine
+        from apps.api.services.task_queue import queue_health
+
+        database = "ok"
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Readiness check failed: %s", exc)
+            database = "unreachable"
+
+        queue = queue_health()
+        healthy = database == "ok" and queue.get("ok", False)
+
+        return {
+            "status": "ready" if healthy else "degraded",
+            "database": database,
+            "queue": queue,
+        }
+
+    app.include_router(auth.router)
+    app.include_router(projects.router)
+    app.include_router(videos.router)
+    app.include_router(generation.router)
+    app.include_router(shutterstock.router)
+    app.include_router(oauth.router)
+    app.include_router(schedules.router)
+
+    # Chooses between the in-process runner and Celery. Done at app creation
+    # so the choice (and the warning for "inline") is visible in the logs at
+    # boot rather than on the first generation request.
+    from apps.api.services.task_queue import configure_job_runner
+
+    configure_job_runner()
+
+    return app
 
 
-# Shutterstock API endpoints
-@app.get("/shutterstock/images/search", response_model=Dict[str, Any])
-async def search_shutterstock_images(
-    query: str,
-    page: int = 1,
-    per_page: int = 25,
-    orientation: str = "portrait",
-    license_type: str = "rm",
-    ssh_api: ShutterstockAPI = Depends(get_shutterstock_api),
-):
-    """Search for stock images on Shutterstock.
-    
-    Args:
-        query: Search query text
-        page: Page number (1-indexed)
-        per_page: Results per page (max 25)
-        orientation: portrait, landscape, square
-        license_type: rm (royalty-free managed), rf (royalty-free)
-    
-    Returns:
-        Shutterstock search results with image metadata
-    """
-    try:
-        results = await ssh_api.search_images(
-            query=query,
-            page=page,
-            per_page=per_page,
-            orientation=orientation,
-            license_type=license_type,
-        )
-        return results
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Shutterstock API error: {str(e)}",
-        )
+app = create_app()
 
-
-@app.get("/shutterstock/videos/search", response_model=Dict[str, Any])
-async def search_shutterstock_videos(
-    query: str,
-    page: int = 1,
-    per_page: int = 25,
-    license_type: str = "rm",
-    ssh_api: ShutterstockAPI = Depends(get_shutterstock_api),
-):
-    """Search for stock videos on Shutterstock.
-    
-    Args:
-        query: Search query text
-        page: Page number (1-indexed)
-        per_page: Results per page (max 25)
-        license_type: rm (royalty-free managed), rf (royalty-free)
-    
-    Returns:
-        Shutterstock search results with video metadata
-    """
-    try:
-        results = await ssh_api.search_videos(
-            query=query,
-            page=page,
-            per_page=per_page,
-            license_type=license_type,
-        )
-        return results
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Shutterstock API error: {str(e)}",
-        )
-
-
-@app.get("/shutterstock/audio/search", response_model=Dict[str, Any])
-async def search_shutterstock_audio(
-    query: str,
-    page: int = 1,
-    per_page: int = 25,
-    license_type: str = "rm",
-    ssh_api: ShutterstockAPI = Depends(get_shutterstock_api),
-):
-    """Search for stock audio on Shutterstock.
-    
-    Args:
-        query: Search query text
-        page: Page number (1-indexed)
-        per_page: Results per page (max 25)
-        license_type: rm (royalty-free managed), rf (royalty-free)
-    
-    Returns:
-        Shutterstock search results with audio metadata
-    """
-    try:
-        results = await ssh_api.search_audio(
-            query=query,
-            page=page,
-            per_page=per_page,
-            license_type=license_type,
-        )
-        return results
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Shutterstock API error: {str(e)}",
-        )
-
-
-@app.get("/shutterstock/images/{image_id}", response_model=Dict[str, Any])
-async def get_shutterstock_image(
-    image_id: int,
-    ssh_api: ShutterstockAPI = Depends(get_shutterstock_api),
-):
-    """Get image details by ID from Shutterstock.
-    
-    Args:
-        image_id: Shutterstock image ID
-    
-    Returns:
-        Image details including licensing options
-    """
-    try:
-        result = await ssh_api.get_image_by_id(image_id=image_id)
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Shutterstock API error: {str(e)}",
-        )
-
-
-@app.get("/shutterstock/videos/{video_id}", response_model=Dict[str, Any])
-async def get_shutterstock_video(
-    video_id: int,
-    ssh_api: ShutterstockAPI = Depends(get_shutterstock_api),
-):
-    """Get video details by ID from Shutterstock.
-    
-    Args:
-        video_id: Shutterstock video ID
-    
-    Returns:
-        Video details including licensing options
-    """
-    try:
-        result = await ssh_api.get_video_by_id(video_id=video_id)
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Shutterstock API error: {str(e)}",
-        )
-
-
-@app.get("/shutterstock/licensing/{media_id}", response_model=Dict[str, Any])
-async def get_shutterstock_licensing(
-    media_id: int,
-    media_type: str = "image",
-    ssh_api: ShutterstockAPI = Depends(get_shutterstock_api),
-):
-    """Get licensing options for a Shutterstock media item.
-    
-    Args:
-        media_id: Shutterstock media ID
-        media_type: image or video
-    
-    Returns:
-        Licensing options with pricing
-    """
-    try:
-        result = await ssh_api.get_licensing_options(
-            media_id=media_id,
-            media_type=media_type,
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Shutterstock API error: {str(e)}",
-        )
-
-
-# Include additional routers would go here
-# from apps.api.routes import ...
-# app.include_router(...)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run("apps.api.main:app", host="0.0.0.0", port=8000, reload=True)

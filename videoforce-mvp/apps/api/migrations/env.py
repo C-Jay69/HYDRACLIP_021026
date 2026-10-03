@@ -18,6 +18,13 @@ from apps.api.models import Base  # noqa: F401
 
 target_metadata = Base.metadata
 
+# Prefer the application's configured DATABASE_URL over the static value in
+# alembic.ini, which was hardcoded with mismatched credentials and used the
+# legacy "postgres://" scheme that SQLAlchemy 2.x rejects.
+from apps.api.core.config import settings  # noqa: E402
+
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
 
 def run_migrations_offline():
     """Run migrations in 'offline' mode."""
@@ -47,3 +54,11 @@ def run_migrations_online():
         )
         with context.begin_transaction():
             context.run_migrations()
+
+# The previous version of this file defined both functions but never called
+# either of them, so `alembic upgrade head` completed without running a single
+# migration.
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

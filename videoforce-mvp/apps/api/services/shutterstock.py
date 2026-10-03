@@ -1,5 +1,5 @@
 import httpx
-from apps.api.app.core.config import settings
+from apps.api.core.config import settings
 
 
 class ShutterstockAPI:

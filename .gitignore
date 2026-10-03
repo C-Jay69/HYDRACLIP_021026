@@ -15,20 +15,72 @@ logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
-# dotenv environment variable files
+# dotenv environment variable files.
+# Catch every variant -- the old list missed .env.production, .env.staging,
+# .env.backup and .env.bak, any of which would have been committed.
 .env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
+.env.*
+!.env.example
+!.env.*.example
+
+# Credentials that OAuth and cloud setup hand you as files. Google's console
+# downloads client_secret_*.json; service accounts and TLS keys follow.
+client_secret*.json
+credentials.json
+service-account*.json
+gha-creds-*.json
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+secrets.y*ml
+
+# Piper voice models: ~60MB each, downloaded not authored.
+models/piper/*
+!models/piper/.gitkeep
+*.onnx
+*.onnx.json
+
+# Rendered output and media scratch. MEDIA_WORK_DIR defaults to /tmp, but
+# anyone pointing it inside the repo should not commit the renders.
+/media_work/
+/videoforce-mvp/media_work/
+*.mp4
+*.mov
+*.mkv
+*.webm
 
 # caches
 .eslintcache
 .cache
 *.tsbuildinfo
 
+# python (videoforce-mvp/apps/api)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv
+venv
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+
 # IntelliJ based IDEs
 .idea
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# local sqlite scratch databases
+*.db
+*.sqlite3
+
+# Celery runtime artefacts
+celerybeat-schedule*
+celerybeat.pid
+# kombu's filesystem transport spools messages into ./control
+control/
