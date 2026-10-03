@@ -1,4 +1,7 @@
-# Codebase analysis — HYDRAPOST_180926
+# Codebase analysis — HYDRACLIP
+
+> **Naming note (2026-10-03):** The product is now **HydraClip** and the backend lives in `backend/`. Historical findings below retain the old Videoforce/VideoForge/HydraPost names where they describe the code as it existed at that point.
+
 
 **Date:** 2 October 2026
 **Scope:** full repository audit, with a deep dive on the landing page
@@ -151,7 +154,7 @@ Severity: 🔴 breaks the page · 🟠 broken behaviour · 🟡 correctness / qu
 | 35 | 🟡 | 7 `.pyc` files committed; `__pycache__` not gitignored | **Fixed** — untracked + ignored |
 | 36 | 🟡 | Both `bun.lock` and `package-lock.json` committed | **Flagged** — see §5 |
 
-### Backend (`videoforce-mvp`) — Phases 0–5 now complete
+### Backend (`backend`) — Phases 0–5 now complete
 
 > Addressed in a follow-up pass. See [§6 Backend progress](#6-backend-progress) for
 > what was built and what remains.
@@ -199,7 +202,7 @@ src/
 ```
 
 Content is grounded in the repo, not invented: pricing tiers and quotas come from the `Plan`
-rows in `videoforce-mvp/seed.py` (Free 3/mo 1 GB, Creator 25/mo 10 GB, Pro unlimited 50 GB), and
+rows in `backend/seed.py` (Free 3/mo 1 GB, Creator 25/mo 10 GB, Pro unlimited 50 GB), and
 the model stack named in the FAQ (Ollama, Piper, Whisper, MinIO) comes from `.env.example` and
 the spec document.
 
@@ -280,7 +283,7 @@ was a hard blocker.
 | `apps/` and `apps/api/` had no `__init__.py`, so `from .app.core...` failed | Added; all imports are now absolute `apps.api.*` |
 | Two config trees: `apps/api/core/` (empty) and `apps/api/app/core/config.py`, imported inconsistently by `main.py` vs `seed.py` | Consolidated into `apps/api/core/config.py`; deleted `apps/api/app/` |
 | Config called `get_env()` at class-definition time — importing without a populated `.env` raised `ValueError`, and a **Stripe key was required just to boot** | Rewritten with pydantic-settings; safe defaults, nothing mandatory to import |
-| Config's `.env` path resolved to `videoforce-mvp/apps/videoforce-mvp/.env` — never loaded | Corrected to `parents[3]` |
+| Config's `.env` path resolved to `backend/apps/backend/.env` — never loaded | Corrected to `parents[3]` |
 | **`migrations/env.py` defined both migration functions but never called either** — `alembic upgrade head` ran zero migrations and reported success | Added the offline/online dispatch |
 | `alembic.ini` hardcoded `postgres://…` (legacy scheme, rejected by SQLAlchemy 2.x) with mismatched credentials | Blanked; `env.py` injects `settings.DATABASE_URL` |
 | No database session layer anywhere | Added `core/db.py`: engine, `SessionLocal`, `get_db`, SQLite-aware config |
@@ -519,7 +522,7 @@ instead, which is the service it actually needs.
 ### Verification
 
 ```bash
-cd videoforce-mvp
+cd backend
 make install      # creates .venv, installs pinned deps
 make test         # 223 tests
 make worker       # celery worker

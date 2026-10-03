@@ -3,11 +3,13 @@ import { serve } from "bun";
 import index from "./index.html";
 
 /**
- * Base URL of the FastAPI service in videoforce-mvp/apps/api.
+ * Base URL of the FastAPI service in backend/apps/api.
  * When it is not reachable the stock endpoints fall back to sample data so the
  * UI stays usable in local development.
  */
-const API_BASE_URL = process.env.VIDEOFORCE_API_URL ?? "http://localhost:8000";
+const API_BASE_URL =
+  process.env.HYDRACLIP_API_URL ?? "http://localhost:8000";
+const PUBLIC_LOGO_URL = new URL("../public/hydraclip_logo.png", import.meta.url);
 
 /** The frontend talks in singular media types; the FastAPI service uses plural. */
 const MEDIA_TYPE_PATHS = {
@@ -74,6 +76,37 @@ function demoPayload(mediaType: MediaType, query: string, page: number, perPage:
   });
 }
 
+async function proxyAuth(request: Request, backendPath: string) {
+  const headers = new Headers();
+  const contentType = request.headers.get("content-type");
+  const cookie = request.headers.get("cookie");
+  if (contentType) headers.set("content-type", contentType);
+  if (cookie) headers.set("cookie", cookie);
+
+  try {
+    const upstream = await fetch(new URL(backendPath, API_BASE_URL), {
+      method: request.method,
+      headers,
+      body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+      redirect: "manual",
+    });
+    const responseHeaders = new Headers();
+    for (const name of ["content-type", "set-cookie", "location"]) {
+      const value = upstream.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  } catch {
+    return Response.json(
+      { detail: "The HydraClip API is unavailable. Check the API container." },
+      { status: 503 },
+    );
+  }
+}
+
 const server = serve({
   // Bind to all interfaces so the dev server is reachable from outside the
   // container/sandbox, not just from localhost.
@@ -81,10 +114,29 @@ const server = serve({
   port: Number(process.env.PORT ?? 3000),
 
   routes: {
-    // Landing page
+    // Landing and authentication pages.
     "/": index,
+    "/auth": index,
+    "/auth/callback": index,
 
-    "/api/health": () => Response.json({ status: "ok", service: "videoforce-web" }),
+    // Same-origin auth proxy: browser code never has to call localhost:8000
+    // directly, and HttpOnly Google callback tickets remain usable.
+    "/api/auth/providers": (req) => proxyAuth(req, "/auth/providers"),
+    "/api/auth/supabase/login": (req) => proxyAuth(req, "/auth/supabase/login"),
+    "/api/auth/supabase/signup": (req) => proxyAuth(req, "/auth/supabase/signup"),
+    "/api/auth/supabase/exchange": (req) => proxyAuth(req, "/auth/supabase/exchange"),
+    "/api/auth/google/authorize": (req) => proxyAuth(req, "/auth/google/authorize"),
+    "/api/auth/google/exchange": (req) => proxyAuth(req, "/auth/google/exchange"),
+
+    "/hydraclip_logo.png": () =>
+      new Response(Bun.file(PUBLIC_LOGO_URL), {
+        headers: {
+          "Cache-Control": "public, max-age=86400",
+          "Content-Type": "image/png",
+        },
+      }),
+
+    "/api/health": () => Response.json({ status: "ok", service: "hydraclip-web" }),
 
     /**
      * Stock media search.

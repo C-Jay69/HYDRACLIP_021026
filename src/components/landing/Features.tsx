@@ -11,7 +11,7 @@ const FEATURES: Feature[] = [
   {
     icon: Clapperboard,
     title: "Script generation",
-    body: "Give it a topic and a local Ollama model drafts a hook, body and call to action sized for the platform you are targeting.",
+    body: "Give it a topic and OpenRouter drafts a hook, body and call to action, with NVIDIA NIM ready if the primary provider is unavailable.",
   },
   {
     icon: ImageIcon,
@@ -30,8 +30,8 @@ const FEATURES: Feature[] = [
   },
   {
     icon: Server,
-    title: "Local-first pipeline",
-    body: "Generation runs on self-hosted open-source models. No prompts, scripts or footage are sent to a third-party model vendor.",
+    title: "Resilient AI pipeline",
+    body: "OpenRouter is the default, NVIDIA NIM is the automatic backup, and local Ollama remains available as an opt-in fallback.",
   },
   {
     icon: ShieldCheck,

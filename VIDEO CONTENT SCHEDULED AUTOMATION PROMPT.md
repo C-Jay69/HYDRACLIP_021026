@@ -979,7 +979,7 @@ Now build the complete codebase.
 *   
 * Create this exact structure:  
 *   
-* videoforge/  
+* hydraclip/
 * ├── apps/  
 * │   ├── web/                          \# Next.js frontend  
 * │   │   ├── app/  
@@ -1220,7 +1220,7 @@ Now build the complete codebase.
 text
 
 You are a senior full-stack developer. Build a working, deployable MVP   
-of a video content scheduling SaaS called VideoForge.
+of a video content scheduling SaaS called HydraClip.
 
 This is for a bootstrap tutorial — use only free/open-source tools.   
 No paid AI APIs.
@@ -1448,7 +1448,7 @@ Admin:
 FOLDER STRUCTURE  
 \====================================
 
-videoforge-mvp/  
+backend/
 ├── web/                    \# Next.js  
 │   ├── app/  
 │   │   ├── (marketing)/  

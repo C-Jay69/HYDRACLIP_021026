@@ -19,8 +19,8 @@ export function LandingPage() {
         and negative z-index applied to every section inside them and the whole
         site rendered invisible and unclickable.
       */}
-      <div aria-hidden="true" className="vf-aurora pointer-events-none fixed inset-0 z-0" />
-      <div aria-hidden="true" className="vf-noise pointer-events-none fixed inset-0 z-0" />
+      <div aria-hidden="true" className="hc-aurora pointer-events-none fixed inset-0 z-0" />
+      <div aria-hidden="true" className="hc-noise pointer-events-none fixed inset-0 z-0" />
 
       <div className="relative z-10 flex min-h-screen flex-col">
         <a

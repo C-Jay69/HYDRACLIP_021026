@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 const FAQS = [
   {
     q: "Which AI models does it actually use?",
-    a: "Scripts come from a local Ollama model (llama3.2 by default), narration from Piper TTS, and caption timing from Whisper. They all run on your own hardware, so there is no per-token cost and no prompt leaves your infrastructure.",
+    a: "Scripts use OpenRouter Auto by default, fall back to NVIDIA NIM, and can optionally fall back to local Ollama. Narration uses Piper TTS and caption timing uses Whisper.",
   },
   {
     q: "Do I need a Shutterstock account?",
@@ -11,11 +11,11 @@ const FAQS = [
   },
   {
     q: "Can it really publish on its own?",
-    a: "Yes for platforms that expose a publishing API under normal developer access. Where a platform does not allow it, Videoforce prepares the render, caption and metadata and hands you a one-tap manual upload instead of silently failing.",
+    a: "Yes for platforms that expose a publishing API under normal developer access. Where a platform does not allow it, HydraClip prepares the render, caption and metadata and hands you a one-tap manual upload instead of silently failing.",
   },
   {
     q: "Where are my videos stored?",
-    a: "In S3-compatible object storage. The default stack ships MinIO for local development and swaps to S3 or Cloudflare R2 in production without a code change.",
+    a: "In your configured S3-compatible storage, including Supabase Storage, AWS S3, Cloudflare R2 or Spaces. Local disk mode is available for development.",
   },
   {
     q: "What happens if I go over my plan quota?",

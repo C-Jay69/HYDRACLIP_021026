@@ -6,7 +6,7 @@ import { useState } from "react";
 type Billing = "monthly" | "annual";
 
 type Plan = {
-  /** Matches `name` in videoforce-mvp/seed.py */
+  /** Matches `name` in backend/seed.py */
   name: string;
   tagline: string;
   monthly: number;
@@ -158,7 +158,7 @@ export function Pricing() {
                   variant={plan.featured ? "default" : "outline"}
                   asChild
                 >
-                  <a href="#cta">{plan.cta}</a>
+                  <a href="/auth?mode=signup">{plan.cta}</a>
                 </Button>
               </div>
             );

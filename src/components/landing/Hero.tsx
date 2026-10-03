@@ -13,22 +13,22 @@ export function Hero() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-muted-foreground">
             <Sparkles className="size-3.5 text-brand-bright" aria-hidden="true" />
-            Runs on local, open-source models — no paid model APIs
+            OpenRouter by default · NVIDIA NIM automatic fallback
           </span>
 
           <h1 className="mt-6 text-4xl leading-[1.08] font-extrabold tracking-tight text-balance sm:text-5xl lg:text-6xl">
-            Turn a topic into a <span className="vf-gradient-text">published video</span>.
+            Turn a topic into a <span className="hc-gradient-text">published video</span>.
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg text-pretty text-muted-foreground">
-            Videoforce writes the script, picks the footage, records the voiceover and schedules the
-            upload — to YouTube, Instagram, TikTok and X. Everything generated locally, every clip
+            HydraClip writes the script, picks the footage, records the voiceover and schedules the
+            upload — to YouTube, Instagram, TikTok and X. Hosted or local AI, with every clip
             properly licensed.
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" className="w-full sm:w-auto" asChild>
-              <a href="#pricing">
+              <a href="/auth?mode=signup">
                 Start creating free
                 <ArrowRight className="size-4" aria-hidden="true" />
               </a>
@@ -57,10 +57,10 @@ export function Hero() {
             aria-hidden="true"
             className="absolute -inset-x-10 -top-10 bottom-10 rounded-[2.5rem] bg-brand/25 blur-3xl"
           />
-          <div className="vf-float relative overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/60">
+          <div className="hc-float relative overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/60">
             <img
               src={heroImage}
-              alt="The Videoforce dashboard showing a publishing calendar filled with scheduled video posts alongside performance charts."
+              alt="The HydraClip dashboard showing a publishing calendar filled with scheduled video posts alongside performance charts."
               width={1600}
               height={900}
               loading="eager"
