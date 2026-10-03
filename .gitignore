@@ -45,7 +45,7 @@ models/piper/*
 # Rendered output and media scratch. MEDIA_WORK_DIR defaults to /tmp, but
 # anyone pointing it inside the repo should not commit the renders.
 /media_work/
-/videoforce-mvp/media_work/
+/backend/media_work/
 *.mp4
 *.mov
 *.mkv
@@ -56,7 +56,7 @@ models/piper/*
 .cache
 *.tsbuildinfo
 
-# python (videoforce-mvp/apps/api)
+# python (backend/apps/api)
 __pycache__/
 *.py[cod]
 *.egg-info/

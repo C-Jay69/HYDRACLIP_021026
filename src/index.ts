@@ -3,13 +3,13 @@ import { serve } from "bun";
 import index from "./index.html";
 
 /**
- * Base URL of the FastAPI service in videoforce-mvp/apps/api.
+ * Base URL of the FastAPI service in backend/apps/api.
  * When it is not reachable the stock endpoints fall back to sample data so the
  * UI stays usable in local development.
  */
 const API_BASE_URL =
-  process.env.HYDRAPOST_API_URL ?? process.env.VIDEOFORCE_API_URL ?? "http://localhost:8000";
-const PUBLIC_LOGO_URL = new URL("../public/hydrapost_logo.png", import.meta.url);
+  process.env.HYDRACLIP_API_URL ?? "http://localhost:8000";
+const PUBLIC_LOGO_URL = new URL("../public/hydraclip_logo.png", import.meta.url);
 
 /** The frontend talks in singular media types; the FastAPI service uses plural. */
 const MEDIA_TYPE_PATHS = {
@@ -86,7 +86,7 @@ const server = serve({
     // Landing page
     "/": index,
 
-    "/hydrapost_logo.png": () =>
+    "/hydraclip_logo.png": () =>
       new Response(Bun.file(PUBLIC_LOGO_URL), {
         headers: {
           "Cache-Control": "public, max-age=86400",
@@ -94,7 +94,7 @@ const server = serve({
         },
       }),
 
-    "/api/health": () => Response.json({ status: "ok", service: "hydrapost-web" }),
+    "/api/health": () => Response.json({ status: "ok", service: "hydraclip-web" }),
 
     /**
      * Stock media search.

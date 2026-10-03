@@ -6,7 +6,7 @@ import { useState } from "react";
 type Billing = "monthly" | "annual";
 
 type Plan = {
-  /** Matches `name` in videoforce-mvp/seed.py */
+  /** Matches `name` in backend/seed.py */
   name: string;
   tagline: string;
   monthly: number;

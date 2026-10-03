@@ -11,7 +11,7 @@ const FAQS = [
   },
   {
     q: "Can it really publish on its own?",
-    a: "Yes for platforms that expose a publishing API under normal developer access. Where a platform does not allow it, HydraPost prepares the render, caption and metadata and hands you a one-tap manual upload instead of silently failing.",
+    a: "Yes for platforms that expose a publishing API under normal developer access. Where a platform does not allow it, HydraClip prepares the render, caption and metadata and hands you a one-tap manual upload instead of silently failing.",
   },
   {
     q: "Where are my videos stored?",

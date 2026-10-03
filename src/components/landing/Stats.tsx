@@ -18,7 +18,7 @@ export function Stats() {
           <div key={stat.label} className="text-center">
             <dt className="sr-only">{stat.label}</dt>
             <dd>
-              <span className="vf-gradient-text block text-4xl font-extrabold tracking-tight sm:text-5xl">
+              <span className="hc-gradient-text block text-4xl font-extrabold tracking-tight sm:text-5xl">
                 {stat.figure}
               </span>
               <span aria-hidden="true" className="mt-2 block text-sm text-muted-foreground">

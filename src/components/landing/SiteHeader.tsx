@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 
-import brandMark from "../../assets/hydrapost-mark.webp";
+import brandMark from "../../assets/hydraclip-mark.webp";
 
 const NAV_LINKS = [
   { href: "#features", label: "Features" },
@@ -19,7 +19,7 @@ export function SiteHeader() {
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3.5">
         <a
           href="#top"
-          aria-label="HydraPost home"
+          aria-label="HydraClip home"
           className="flex items-center gap-2.5 rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           <img
@@ -31,7 +31,7 @@ export function SiteHeader() {
             className="size-9 rounded-xl object-cover shadow-lg shadow-blue-500/15"
           />
           <span className="text-lg font-bold tracking-[0.04em]">
-            HYDRA<span className="vf-gradient-text">POST</span>
+            HYDRA<span className="hc-gradient-text">CLIP</span>
           </span>
         </a>
 

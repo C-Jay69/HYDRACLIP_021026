@@ -24,11 +24,11 @@ describe("landing page renders real content", () => {
     expect(html.length).toBeGreaterThan(5000);
   });
 
-  test("renders the HydraPost brand and uploaded logo", () => {
+  test("renders the HydraClip brand and uploaded logo", () => {
     expect(html).toContain("HYDRA");
-    expect(html).toContain("POST");
-    expect(html).toContain("hydrapost-mark");
-    expect(html).toContain("hydrapost-wordmark");
+    expect(html).toContain("CLIP");
+    expect(html).toContain("hydraclip-mark");
+    expect(html).toContain("hydraclip-wordmark");
   });
 
   test("renders a top-level heading", () => {
@@ -85,7 +85,7 @@ describe("navigation anchors resolve to real sections", () => {
 describe("decorative layers do not swallow the page", () => {
   test("content is not nested inside a pointer-events-none layer", () => {
     // The aurora/noise layers must self-close before any content starts.
-    const firstAurora = html.indexOf("vf-aurora");
+    const firstAurora = html.indexOf("hc-aurora");
     const mainStart = html.indexOf('id="main"');
 
     expect(firstAurora).toBeGreaterThanOrEqual(0);
@@ -98,7 +98,7 @@ describe("decorative layers do not swallow the page", () => {
   });
 
   test("the decorative layers are aria-hidden", () => {
-    expect(html).toMatch(/aria-hidden="true"[^>]*class="vf-aurora/);
+    expect(html).toMatch(/aria-hidden="true"[^>]*class="hc-aurora/);
   });
 
   test("no element applies a near-invisible inline opacity to content", () => {

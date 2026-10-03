@@ -28,7 +28,7 @@ const STEPS: Step[] = [
   {
     number: "03",
     title: "Schedule and forget it",
-    body: "Choose the platforms and the slots. HydraPost renders, uploads and publishes on time, then reports back on anything that failed.",
+    body: "Choose the platforms and the slots. HydraClip renders, uploads and publishes on time, then reports back on anything that failed.",
     image: scheduleImage,
     alt: "Weekly scheduling calendar with queued video posts and platform badges.",
   },
