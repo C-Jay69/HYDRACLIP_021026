@@ -24,7 +24,7 @@ const PLANS: Plan[] = [
     features: [
       { label: "3 videos per month", included: true },
       { label: "1 GB asset storage", included: true },
-      { label: "Local AI script, voice and captions", included: true },
+      { label: "AI script, neural voice and captions", included: true },
       { label: "Watermark-free exports", included: false },
       { label: "Scheduled auto-publishing", included: false },
     ],

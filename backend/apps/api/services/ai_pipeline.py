@@ -1,4 +1,4 @@
-"""HydraClip AI pipeline: hosted LLM failover, Piper TTS, Whisper, and FFmpeg.
+"""HydraClip AI pipeline: hosted LLMs, Edge/Piper TTS, Whisper, and FFmpeg.
 
 Nothing in this module was reachable before: no caller existed anywhere in the
 codebase, and ``generate_script`` raised ``AttributeError`` on its own return
@@ -7,6 +7,7 @@ statement, so the pipeline had never run even once. See ANALYSIS.md §6.
 
 import asyncio
 import json
+import logging
 import shutil
 import subprocess
 import uuid
@@ -17,6 +18,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from apps.api.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Scratch space for intermediate artefacts. Each run gets a unique filename:
 # the previous fixed paths meant two concurrent jobs overwrote each other.
@@ -316,8 +319,95 @@ def build_llm(ollama_model: str | None = None) -> FailoverLLM:
     return FailoverLLM(providers or [available["openrouter"], available["nvidia_nim"]])
 
 
+class EdgeTTS:
+    """Online neural speech synthesis through Microsoft Edge's TTS service.
+
+    ``edge-tts`` emits MP3 audio.  When the assembler asks for a ``.wav``
+    destination we return a neighbouring ``.edge.mp3`` path; the assembler
+    already normalises every returned clip to WAV before concatenation.
+    """
+
+    provider_name = "Edge TTS"
+    VOICES = {
+        "ruffalo": "en-US-GuyNeural",
+        "isley": "en-US-JennyNeural",
+    }
+
+    def __init__(self, voice: str = "lessac") -> None:
+        self.requested_voice = voice
+        if voice == "lessac":
+            self.voice = settings.EDGE_TTS_VOICE
+        elif voice in self.VOICES:
+            self.voice = self.VOICES[voice]
+        elif voice.endswith("Neural") and "-" in voice:
+            # Allow callers to select any full Edge voice name without adding
+            # it to HydraClip's short-name compatibility map first.
+            self.voice = voice
+        else:
+            self.voice = settings.EDGE_TTS_VOICE
+
+    @classmethod
+    def unavailable_reason(cls, voice: str = "lessac") -> Optional[str]:
+        """Return a local configuration problem, without making a network call."""
+        try:
+            import edge_tts  # noqa: F401
+        except ImportError:
+            return "the 'edge-tts' package is not installed"
+        return None
+
+    def availability_error(self) -> Optional[str]:
+        return self.unavailable_reason(self.requested_voice)
+
+    @staticmethod
+    def _media_path(output_path: str | None) -> Path:
+        if output_path is None:
+            return Path(_work_path(".mp3", prefix="tts_edge"))
+
+        requested = Path(output_path)
+        if requested.suffix.lower() == ".mp3":
+            return requested
+        return requested.with_name(f"{requested.stem}.edge.mp3")
+
+    async def synthesize_async(self, text: str, output_path: str = None) -> str:
+        """Write neural speech to an MP3 file and return its actual path."""
+        if not text.strip():
+            raise PipelineError("Cannot synthesise an empty narration.")
+
+        try:
+            import edge_tts
+        except ImportError as exc:
+            raise StageUnavailable("The 'edge-tts' package is not installed.") from exc
+
+        media_path = self._media_path(output_path)
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        communicate = edge_tts.Communicate(
+            text,
+            self.voice,
+            rate=settings.EDGE_TTS_RATE,
+            volume=settings.EDGE_TTS_VOLUME,
+            pitch=settings.EDGE_TTS_PITCH,
+        )
+
+        try:
+            await asyncio.wait_for(
+                communicate.save(str(media_path)),
+                timeout=settings.TTS_TIMEOUT_SECONDS,
+            )
+            if not media_path.exists() or media_path.stat().st_size == 0:
+                raise RuntimeError("Edge TTS returned no audio")
+        except Exception:
+            # Do not leave a truncated MP3 that a retry or cleanup task could
+            # mistake for a completed narration.
+            media_path.unlink(missing_ok=True)
+            raise
+
+        return str(media_path)
+
+
 class PiperTTS:
-    """Local TTS using Piper."""
+    """Local speech synthesis and automatic fallback for Edge TTS."""
+
+    provider_name = "Piper"
 
     #: Voice name -> model filename, resolved under settings.PIPER_MODEL_PATH.
     VOICES = {
@@ -327,6 +417,7 @@ class PiperTTS:
     }
 
     def __init__(self, model_path: str = None, voice: str = "lessac"):
+        self.voice = voice
         if model_path is None:
             filename = self.VOICES.get(voice, self.VOICES["lessac"])
             model_path = str(Path(settings.PIPER_MODEL_PATH) / filename)
@@ -341,6 +432,13 @@ class PiperTTS:
         model = Path(settings.PIPER_MODEL_PATH) / cls.VOICES.get(voice, cls.VOICES["lessac"])
         if not model.exists():
             return f"the Piper voice model is missing at {model}"
+        return None
+
+    def availability_error(self) -> Optional[str]:
+        if shutil.which("piper") is None:
+            return "the 'piper' binary is not on PATH"
+        if not self.model.exists():
+            return f"the Piper voice model is missing at {self.model}"
         return None
 
     def synthesize(self, text: str, output_path: str = None) -> str:
@@ -383,6 +481,92 @@ class PiperTTS:
         return await asyncio.get_event_loop().run_in_executor(
             None, self.synthesize, text, output_path
         )
+
+
+class FailoverTTS:
+    """Try speech providers in order and stick to a fallback after failure."""
+
+    def __init__(self, providers: list[Any]) -> None:
+        self.providers = providers
+        self.last_provider: str | None = None
+        self._start_index = 0
+
+    def unavailable_reason(self) -> Optional[str]:
+        reasons: list[str] = []
+        for provider in self.providers:
+            reason = provider.availability_error()
+            if reason is None:
+                return None
+            reasons.append(f"{provider.provider_name}: {reason}")
+        detail = "; ".join(reasons) or "no TTS providers were configured"
+        return f"all configured TTS providers are unavailable ({detail})"
+
+    async def synthesize_async(self, text: str, output_path: str = None) -> str:
+        if not text.strip():
+            raise PipelineError("Cannot synthesise an empty narration.")
+
+        failures: list[str] = []
+        for index in range(self._start_index, len(self.providers)):
+            provider = self.providers[index]
+            reason = provider.availability_error()
+            if reason:
+                failures.append(f"{provider.provider_name}: {reason}")
+                self._start_index = index + 1
+                continue
+
+            try:
+                result = await provider.synthesize_async(text, output_path)
+            except Exception as exc:  # provider/network failures trigger fallback
+                failures.append(
+                    f"{provider.provider_name}: {type(exc).__name__}: {exc}"
+                )
+                logger.warning(
+                    "%s synthesis failed; trying the next provider (%s)",
+                    provider.provider_name,
+                    type(exc).__name__,
+                )
+                # A render narrates several scenes. Once Edge fails, keeping
+                # the fallback sticky avoids another network timeout per scene
+                # and prevents voices from alternating back and forth.
+                self._start_index = index + 1
+                continue
+
+            self.last_provider = provider.provider_name
+            self._start_index = index
+            return result
+
+        detail = "; ".join(failures) or "no TTS providers were configured"
+        raise StageUnavailable(f"Narration is unavailable ({detail}).")
+
+
+def build_tts(
+    voice: str = "lessac", piper_model_path: str | None = None
+) -> FailoverTTS:
+    """Build the configured Edge TTS -> Piper provider chain."""
+    available = {
+        "edge": EdgeTTS(voice=voice),
+        "piper": PiperTTS(model_path=piper_model_path, voice=voice),
+    }
+    aliases = {
+        "edge": "edge",
+        "edge_tts": "edge",
+        "edge-tts": "edge",
+        "piper": "piper",
+    }
+    order = [
+        aliases.get(name.strip().lower())
+        for name in settings.TTS_PROVIDER_ORDER.split(",")
+    ]
+    providers: list[Any] = []
+    for name in order:
+        if name and available[name] not in providers:
+            providers.append(available[name])
+    return FailoverTTS(providers or [available["edge"], available["piper"]])
+
+
+def tts_unavailable_reason(voice: str = "lessac") -> Optional[str]:
+    """Why every configured speech provider is locally unavailable, if so."""
+    return build_tts(voice=voice).unavailable_reason()
 
 
 class WhisperSTT:
@@ -660,7 +844,8 @@ class AIPipeline:
                  stt_model_size: str = None,
                  llm: Any = None):
         self.llm = llm or build_llm(ollama_model=llm_model)
-        self.tts = PiperTTS(model_path=tts_model_path)
+        self.tts_model_path = tts_model_path
+        self.tts = build_tts(piper_model_path=tts_model_path)
         self.stt = WhisperSTT(model_size=stt_model_size)
         self.ffmpeg = FFmpegProcessor()
 
@@ -718,19 +903,12 @@ class AIPipeline:
         }
 
     async def text_to_speech(self, text: str, voice: str = "lessac") -> str:
-        """Convert text to speech using Piper.
-        
-        Args:
-            text: Text to convert
-            voice: Voice model name
-        
-        Returns:
-            Path to generated WAV audio file
+        """Convert text to speech with Edge TTS and automatic Piper fallback.
+
+        ``voice`` accepts HydraClip's legacy Piper aliases or a full Edge
+        neural voice name such as ``en-US-AriaNeural``.
         """
-        # Voice -> model resolution lives on PiperTTS so it honours
-        # PIPER_MODEL_PATH instead of hardcoding /models/piper.
-        tts = PiperTTS(voice=voice)
-        # Synthesis shells out to a binary; keep it off the event loop.
+        tts = build_tts(voice=voice, piper_model_path=self.tts_model_path)
         return await tts.synthesize_async(text)
 
     async def speech_to_text(self, audio_path: str) -> Dict[str, Any]:
@@ -756,8 +934,9 @@ class AIPipeline:
         """Render a finished MP4 from a generated script.
 
         No frames are generated. The video is assembled from stock footage
-        sourced scene by scene, narrated with Piper, and captioned from the
-        narration text. See services/assembly.py for the stage breakdown.
+        sourced scene by scene, narrated with Edge TTS (Piper fallback), and
+        captioned from the narration text. See services/assembly.py for the
+        stage breakdown.
 
         Args:
             script: Script dict from generate_script()
@@ -783,18 +962,19 @@ class AIPipeline:
         voice = script.get("voice") or "lessac"
 
         # The assembler narrates scene by scene so it can measure each
-        # segment, so hand it a synthesiser bound to the chosen voice
-        # rather than the whole-script text_to_speech().
-        tts = PiperTTS(voice=voice)
+        # segment. Reuse one failover chain for the whole render so a failed
+        # Edge connection switches to Piper once instead of timing out again
+        # for every scene.
+        tts = build_tts(voice=voice, piper_model_path=self.tts_model_path)
 
         async def synthesise(segment: str, destination: str) -> str:
             return await tts.synthesize_async(segment, destination)
 
         assembler = VideoAssembler(synthesiser=synthesise)
 
-        # Check Piper here too: the assembler can only see that *a*
-        # synthesiser was supplied, not that its voice model exists.
-        tts_problem = PiperTTS.unavailable_reason(voice)
+        # The assembler can only see that a callable was supplied, not whether
+        # any configured speech provider is locally usable.
+        tts_problem = tts.unavailable_reason()
         if tts_problem:
             raise StageUnavailable(f"Narration is unavailable because {tts_problem}.")
 

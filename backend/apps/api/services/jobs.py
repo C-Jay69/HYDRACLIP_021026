@@ -34,9 +34,9 @@ from apps.api.services import quota as quota_service
 from apps.api.services.ai_pipeline import (
     AIPipeline,
     PipelineError,
-    PiperTTS,
     StageNotImplemented,
     get_ai_pipeline,
+    tts_unavailable_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class Stage:
 
 STAGES: tuple[Stage, ...] = (
     Stage("script", 40, "Write the script with the LLM"),
-    Stage("voiceover", 80, "Synthesise the voiceover with Piper"),
+    Stage("voiceover", 80, "Synthesise the voiceover with Edge TTS or Piper"),
     Stage("assemble", 100, "Source stock footage and render the MP4"),
 )
 
@@ -80,8 +80,8 @@ STAGE_NAMES: tuple[str, ...] = tuple(s.name for s in STAGES)
 
 #: Stages a request runs when it does not say otherwise.
 #:
-#: Script only. Assembly is implemented now, but it still needs the Piper
-#: binary, a voice model, ffmpeg and at least one stock provider API key --
+#: Script only. Assembly is implemented now, but it still needs a reachable
+#: speech provider, ffmpeg and at least one stock provider API key --
 #: so defaulting to the full set would make every out-of-the-box request
 #: fail on a fresh checkout. Callers that have the dependencies ask for
 #: ["script", "voiceover", "assemble"] explicitly, and /jobs/preflight
@@ -103,7 +103,7 @@ async def _NOOP_SYNTHESISER(text: str, destination: str) -> str:
 
     ``VideoAssembler.unavailable_reason`` treats a missing synthesiser as a
     problem, which is right at render time and wrong here: preflight checks
-    Piper separately and would otherwise report it twice.
+    the configured TTS chain separately and would otherwise report it twice.
     """
     raise NotImplementedError("preflight does not synthesise audio")
 
@@ -128,7 +128,7 @@ async def preflight(
             if reason:
                 problems[stage.name] = reason
         elif stage.name == "voiceover":
-            reason = PiperTTS.unavailable_reason()
+            reason = tts_unavailable_reason()
             if reason:
                 problems[stage.name] = reason
         elif stage.name == "assemble":
@@ -138,7 +138,7 @@ async def preflight(
             from apps.api.services.assembly import VideoAssembler
 
             missing = []
-            tts_reason = PiperTTS.unavailable_reason()
+            tts_reason = tts_unavailable_reason()
             if tts_reason:
                 missing.append(f"narration is unavailable because {tts_reason}")
 

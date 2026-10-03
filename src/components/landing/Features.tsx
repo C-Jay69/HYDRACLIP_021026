@@ -21,7 +21,7 @@ const FEATURES: Feature[] = [
   {
     icon: AudioLines,
     title: "Voiceover and music",
-    body: "Piper handles text-to-speech and Whisper aligns captions, so narration and subtitles stay in sync without a studio.",
+    body: "Edge neural voices handle narration with local Piper fallback, while measured audio timing keeps subtitles in sync without a studio.",
   },
   {
     icon: CalendarClock,

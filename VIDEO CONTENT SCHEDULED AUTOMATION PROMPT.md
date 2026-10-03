@@ -1250,7 +1250,7 @@ STRICT CONSTRAINTS
 
 AI tools (free/open-source only):  
 \- Ollama (Llama3 or Mistral) for script/title/tags generation  
-\- Piper TTS for voiceover  
+\- Edge TTS for primary voiceover with local Piper fallback
 \- faster-whisper for subtitles  
 \- FFmpeg for video assembly  
 \- Template-based captions, not AI image generation  
@@ -1353,7 +1353,7 @@ Step 1 \- Generate script:
   Store script in video record
 
 Step 2 \- Generate voiceover:  
-  Pass script to Piper TTS  
+  Pass script to Edge TTS and fall back to Piper on provider failure
   Save .wav file to storage
 
 Step 3 \- Generate subtitles:  

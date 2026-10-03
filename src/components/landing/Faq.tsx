@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 const FAQS = [
   {
     q: "Which AI models does it actually use?",
-    a: "Scripts use OpenRouter Auto by default, fall back to NVIDIA NIM, and can optionally fall back to local Ollama. Narration uses Piper TTS and caption timing uses Whisper.",
+    a: "Scripts use OpenRouter Auto by default, fall back to NVIDIA NIM, and can optionally use local Ollama. Narration uses Edge neural voices with automatic local Piper fallback.",
   },
   {
     q: "Do I need a Shutterstock account?",

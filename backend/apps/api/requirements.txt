@@ -27,8 +27,9 @@ PyJWT==2.10.1
 # were named *_encrypted from the start but nothing ever encrypted them.
 cryptography==44.0.0
 
-# HTTP client (Shutterstock + Ollama integrations)
+# HTTP clients and online text-to-speech
 httpx==0.28.1
+edge-tts==7.2.8
 
 # Background jobs. docker-compose.yml has always run a flower container
 # against a Celery broker, but nothing declared Celery as a dependency

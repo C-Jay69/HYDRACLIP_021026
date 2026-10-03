@@ -61,9 +61,7 @@ def pipeline(monkeypatch):
     """Swap the real pipeline out, and make every stage look available."""
     fake = FakePipeline()
     monkeypatch.setattr(job_service, "get_ai_pipeline", lambda: fake)
-    monkeypatch.setattr(
-        job_service.PiperTTS, "unavailable_reason", classmethod(lambda cls, voice="lessac": None)
-    )
+    monkeypatch.setattr(job_service, "tts_unavailable_reason", lambda voice="lessac": None)
     return fake
 
 

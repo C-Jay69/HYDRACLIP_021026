@@ -62,11 +62,27 @@ NVIDIA_NIM_API_KEY=your-private-key
 NVIDIA_NIM_MODEL=meta/llama-3.1-70b-instruct
 ```
 
-Start the optional local fallback only when needed:
+Start the optional local LLM fallback only when needed:
 
 ```bash
 docker compose --profile local-llm up -d ollama
 ```
+
+Narration defaults to the online neural voices provided by `edge-tts`; it does
+not require an API key. If Edge is unavailable, HydraClip automatically retries
+with local Piper. The existing short voice names remain compatible, and a full
+Edge name such as `en-GB-SoniaNeural` can also be submitted:
+
+```dotenv
+TTS_PROVIDER_ORDER=edge,piper
+EDGE_TTS_VOICE=en-US-AriaNeural
+EDGE_TTS_RATE=+0%
+PIPER_MODEL_PATH=/models/piper
+```
+
+Edge TTS sends narration text to Microsoft's online speech service. For an
+offline/private deployment, set `TTS_PROVIDER_ORDER=piper` and put the matching
+`.onnx` and `.onnx.json` voice files in `backend/models/piper`.
 
 Flower is optional monitoring—not an application dependency. Start its current
 documented image only when you want the dashboard at http://localhost:5555:
@@ -147,4 +163,4 @@ make install
 make test
 ```
 
-See `backend/.env.example` for Supabase PostgreSQL/Auth, S3-compatible storage, OpenRouter/NVIDIA/Ollama, stock-media, OAuth, and Piper settings.
+See `backend/.env.example` for Supabase PostgreSQL/Auth, S3-compatible storage, OpenRouter/NVIDIA/Ollama, Edge/Piper speech, stock-media, and OAuth settings.
