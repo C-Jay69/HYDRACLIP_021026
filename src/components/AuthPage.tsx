@@ -55,6 +55,7 @@ export function AuthPage({ callback = false }: { callback?: boolean }) {
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [providersLoaded, setProvidersLoaded] = useState(false);
+  const [providerLoadFailed, setProviderLoadFailed] = useState(false);
 
   useEffect(() => {
     api<{ supabase_email: boolean; google: boolean }>("/api/auth/providers")
@@ -62,7 +63,10 @@ export function AuthPage({ callback = false }: { callback?: boolean }) {
         setGoogleEnabled(providers.google);
         setEmailEnabled(providers.supabase_email);
       })
-      .catch((reason: Error) => setError(reason.message))
+      .catch((reason: Error) => {
+        setProviderLoadFailed(true);
+        setError(reason.message);
+      })
       .finally(() => setProvidersLoaded(true));
   }, []);
 
@@ -168,7 +172,7 @@ export function AuthPage({ callback = false }: { callback?: boolean }) {
 
             {!providersLoaded ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Loading login providers…</p>
-            ) : emailEnabled ? (
+            ) : providerLoadFailed ? null : emailEnabled ? (
               <form onSubmit={submit} className="space-y-4">
                 {mode === "signup" && <div className="space-y-2"><Label htmlFor="auth-name">Name</Label><Input id="auth-name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></div>}
                 <div className="space-y-2"><Label htmlFor="auth-email">Email</Label><Input id="auth-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></div>
