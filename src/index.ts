@@ -80,8 +80,12 @@ async function proxyAuth(request: Request, backendPath: string) {
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
   const cookie = request.headers.get("cookie");
+  const authorization = request.headers.get("authorization");
   if (contentType) headers.set("content-type", contentType);
   if (cookie) headers.set("cookie", cookie);
+  // /auth/me and /auth/logout authenticate with a bearer token — without
+  // forwarding this header the proxy turned every session check into a 401.
+  if (authorization) headers.set("authorization", authorization);
 
   try {
     const upstream = await fetch(new URL(backendPath, API_BASE_URL), {
@@ -127,6 +131,10 @@ const server = serve({
     "/api/auth/supabase/exchange": (req) => proxyAuth(req, "/auth/supabase/exchange"),
     "/api/auth/google/authorize": (req) => proxyAuth(req, "/auth/google/authorize"),
     "/api/auth/google/exchange": (req) => proxyAuth(req, "/auth/google/exchange"),
+    // Session lifecycle used by AuthSessionProvider to restore/validate/sign out.
+    "/api/auth/me": (req) => proxyAuth(req, "/auth/me"),
+    "/api/auth/refresh": (req) => proxyAuth(req, "/auth/refresh"),
+    "/api/auth/logout": (req) => proxyAuth(req, "/auth/logout"),
 
     "/hydraclip_logo.png": () =>
       new Response(Bun.file(PUBLIC_LOGO_URL), {

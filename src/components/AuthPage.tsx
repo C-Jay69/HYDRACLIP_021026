@@ -1,3 +1,4 @@
+import { saveSession, type TokenPair } from "@/auth-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,21 +9,12 @@ import brandMark from "../assets/hydraclip-mark.webp";
 
 type AuthMode = "login" | "signup";
 
-type TokenPair = {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-  user: { email: string; name?: string | null };
-};
-
 type AuthResult = {
   authenticated: boolean;
   requires_email_confirmation: boolean;
   message: string;
   tokens?: TokenPair | null;
 };
-
-const SESSION_KEY = "hydraclip.auth";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -35,10 +27,6 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(body.detail || "Authentication request failed.");
   }
   return body as T;
-}
-
-function saveSession(tokens: TokenPair) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(tokens));
 }
 
 export function AuthPage({ callback = false }: { callback?: boolean }) {
