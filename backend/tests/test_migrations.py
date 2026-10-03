@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import importlib
 
+import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-def test_initial_migration_does_not_create_postgres_enums_twice(monkeypatch):
-    """Pre-created enum types must not be re-created by CREATE TABLE events."""
+def test_initial_migration_uses_safe_postgres_types(monkeypatch):
+    """Enum DDL and seed values must carry explicit PostgreSQL-safe types."""
 
     migration = importlib.import_module(
         "apps.api.migrations.versions.20260930_initial"
     )
     created_enums: list[tuple[str, bool]] = []
     tables: dict[str, tuple[object, ...]] = {}
+    bulk_insert_tables: dict[str, object] = {}
 
     class FakeOperations:
         @staticmethod
@@ -30,8 +32,8 @@ def test_initial_migration_does_not_create_postgres_enums_twice(monkeypatch):
             return None
 
         @staticmethod
-        def bulk_insert(*_args, **_kwargs):
-            return None
+        def bulk_insert(table, _rows, **_kwargs):
+            bulk_insert_tables[table.name] = table
 
         @staticmethod
         def f(name):
@@ -68,3 +70,17 @@ def test_initial_migration_does_not_create_postgres_enums_twice(monkeypatch):
         assert isinstance(status_column.type, postgresql.ENUM)
         assert status_column.type.name == enum_name
         assert status_column.type.create_type is False
+
+    assert set(bulk_insert_tables) == {
+        "plans",
+        "system_settings",
+        "prompt_templates",
+    }
+    for seed_table in bulk_insert_tables.values():
+        assert all(
+            not isinstance(column.type, sa.types.NullType)
+            for column in seed_table.c
+        )
+
+    plans_seed_table = bulk_insert_tables["plans"]
+    assert isinstance(plans_seed_table.c.features_json.type, sa.JSON)

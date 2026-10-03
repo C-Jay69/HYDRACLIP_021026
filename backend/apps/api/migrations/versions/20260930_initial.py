@@ -297,12 +297,15 @@ def upgrade():
     op.bulk_insert(
         sa.table(
             "plans",
-            sa.column("name"),
-            sa.column("stripe_price_id"),
-            sa.column("video_limit_monthly"),
-            sa.column("storage_limit_gb"),
-            sa.column("is_active"),
-            sa.column("features_json"),
+            sa.column("name", sa.String()),
+            sa.column("stripe_price_id", sa.String()),
+            sa.column("video_limit_monthly", sa.Integer()),
+            sa.column("storage_limit_gb", sa.Integer()),
+            sa.column("is_active", sa.Boolean()),
+            # Supplying the JSON type makes SQLAlchemy serialize each dict
+            # before psycopg2 sees it.  An untyped sa.column has NullType and
+            # sends the raw dict, which psycopg2 cannot adapt.
+            sa.column("features_json", sa.JSON()),
         ),
         [
             {
@@ -336,10 +339,10 @@ def upgrade():
     op.bulk_insert(
         sa.table(
             "system_settings",
-            sa.column("key"),
-            sa.column("value"),
-            sa.column("value_type"),
-            sa.column("description"),
+            sa.column("key", sa.String()),
+            sa.column("value", sa.String()),
+            sa.column("value_type", sa.String()),
+            sa.column("description", sa.String()),
         ),
         [
             {"key": "site_name", "value": "HydraClip", "value_type": "string", "description": "Site name"},
@@ -354,10 +357,10 @@ def upgrade():
     op.bulk_insert(
         sa.table(
             "prompt_templates",
-            sa.column("name"),
-            sa.column("category"),
-            sa.column("script"),
-            sa.column("is_default"),
+            sa.column("name", sa.String()),
+            sa.column("category", sa.String()),
+            sa.column("script", sa.Text()),
+            sa.column("is_default", sa.Boolean()),
         ),
         [
             {
