@@ -1,5 +1,6 @@
+import { useAuthSession } from "@/auth-session";
 import { Button } from "@/components/ui/button";
-import { Menu, X } from "lucide-react";
+import { CircleUserRound, Menu, X } from "lucide-react";
 import { useState } from "react";
 
 import brandMark from "../../assets/hydraclip-mark.webp";
@@ -13,6 +14,8 @@ const NAV_LINKS = [
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
+  const session = useAuthSession();
+  const signedInLabel = session.user?.name || session.user?.email || "Account";
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/80 bg-background/80 backdrop-blur-xl">
@@ -47,14 +50,29 @@ export function SiteHeader() {
           ))}
         </nav>
 
-        <div className="hidden items-center gap-2 md:flex">
-          <Button variant="ghost" asChild>
-            <a href="/auth">Sign in</a>
-          </Button>
-          <Button asChild>
-            <a href="/auth?mode=signup">Get started</a>
-          </Button>
-        </div>
+        {session.status === "authenticated" ? (
+          <div className="hidden items-center gap-2 md:flex">
+            <span
+              className="inline-flex max-w-56 items-center gap-1.5 rounded-full border border-border bg-secondary/60 py-1.5 pr-3.5 pl-2.5 text-sm text-muted-foreground"
+              title={session.user?.email ?? undefined}
+            >
+              <CircleUserRound className="size-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{signedInLabel}</span>
+            </span>
+            <Button variant="ghost" onClick={() => void session.signOut()}>
+              Sign out
+            </Button>
+          </div>
+        ) : (
+          <div className="hidden items-center gap-2 md:flex">
+            <Button variant="ghost" asChild>
+              <a href="/auth">Sign in</a>
+            </Button>
+            <Button asChild>
+              <a href="/auth?mode=signup">Get started</a>
+            </Button>
+          </div>
+        )}
 
         <Button
           variant="ghost"
@@ -83,16 +101,36 @@ export function SiteHeader() {
               </a>
             ))}
             <div className="mt-2 flex flex-col gap-2">
-              <Button variant="outline" asChild>
-                <a href="/auth" onClick={() => setOpen(false)}>
-                  Sign in
-                </a>
-              </Button>
-              <Button asChild>
-                <a href="/auth?mode=signup" onClick={() => setOpen(false)}>
-                  Get started
-                </a>
-              </Button>
+              {session.status === "authenticated" ? (
+                <>
+                  <span className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+                    <CircleUserRound className="size-4 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{signedInLabel}</span>
+                  </span>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setOpen(false);
+                      void session.signOut();
+                    }}
+                  >
+                    Sign out
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" asChild>
+                    <a href="/auth" onClick={() => setOpen(false)}>
+                      Sign in
+                    </a>
+                  </Button>
+                  <Button asChild>
+                    <a href="/auth?mode=signup" onClick={() => setOpen(false)}>
+                      Get started
+                    </a>
+                  </Button>
+                </>
+              )}
             </div>
           </nav>
         </div>
