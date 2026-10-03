@@ -88,6 +88,14 @@ def test_hosted_llm_is_default_and_ollama_is_opt_in():
     assert "NVIDIA_API_KEY" in environment["NVIDIA_NIM_API_KEY"]
 
 
+def test_edge_tts_is_primary_and_piper_is_the_local_fallback():
+    environment = _environment("api")
+
+    assert environment["TTS_PROVIDER_ORDER"] == "${TTS_PROVIDER_ORDER:-edge,piper}"
+    assert environment["EDGE_TTS_VOICE"] == "${EDGE_TTS_VOICE:-en-US-AriaNeural}"
+    assert environment["PIPER_MODEL_PATH"] == "${PIPER_MODEL_PATH:-/models/piper}"
+
+
 def test_login_provider_settings_are_forwarded():
     environment = _environment("api")
 

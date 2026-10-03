@@ -580,10 +580,9 @@ async def test_watermark_failure_is_not_reported_as_success(
     monkeypatch.setattr(
         pipeline_module.FFmpegProcessor, "add_watermark", staticmethod(explode)
     )
+    monkeypatch.setattr(pipeline_module.settings, "TTS_PROVIDER_ORDER", "piper")
     monkeypatch.setattr(
-        pipeline_module.PiperTTS,
-        "unavailable_reason",
-        classmethod(lambda cls, voice="lessac": None),
+        pipeline_module.PiperTTS, "availability_error", lambda self: None
     )
     monkeypatch.setattr(pipeline_module.PiperTTS, "synthesize", tone)
 
@@ -629,10 +628,9 @@ async def test_a_successful_watermark_is_reported(tmp_path, source_media, monkey
         )
         return output_path
 
+    monkeypatch.setattr(pipeline_module.settings, "TTS_PROVIDER_ORDER", "piper")
     monkeypatch.setattr(
-        pipeline_module.PiperTTS,
-        "unavailable_reason",
-        classmethod(lambda cls, voice="lessac": None),
+        pipeline_module.PiperTTS, "availability_error", lambda self: None
     )
     monkeypatch.setattr(pipeline_module.PiperTTS, "synthesize", tone)
 

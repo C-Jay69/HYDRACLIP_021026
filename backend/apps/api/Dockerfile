@@ -30,10 +30,10 @@ WORKDIR /app
 COPY apps/api/requirements.txt ./apps/api/requirements.txt
 RUN pip install -r apps/api/requirements.txt
 
-# Piper provides the narration. The image previously installed neither the
-# binary nor a voice model, so the voiceover and assemble stages could only
-# ever fail inside the container -- /pipeline/status would report them
-# unavailable on a correctly built image.
+# Edge TTS (installed from requirements.txt) is the primary online narrator.
+# Piper is the local fallback. The image previously installed neither the
+# Piper binary nor a voice model, so offline narration could only fail inside
+# the container -- /pipeline/status would report it unavailable.
 #
 # The voice model is a ~60MB download and is deliberately NOT baked in:
 # mount it at PIPER_MODEL_PATH (see docker-compose.yml) so the image stays

@@ -147,7 +147,14 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "llama3.2"
     OLLAMA_TIMEOUT_SECONDS: float = 120.0
 
-    # --- Local speech/media models -----------------------------------------
+    # --- Speech/media models ------------------------------------------------
+    # Edge TTS is the zero-key online primary. Piper remains the local backup
+    # when Microsoft's service is unreachable or explicitly disabled.
+    TTS_PROVIDER_ORDER: str = "edge,piper"
+    EDGE_TTS_VOICE: str = "en-US-AriaNeural"
+    EDGE_TTS_RATE: str = "+0%"
+    EDGE_TTS_VOLUME: str = "+0%"
+    EDGE_TTS_PITCH: str = "+0Hz"
     PIPER_MODEL_PATH: str = "/models/piper"
     WHISPER_MODEL_SIZE: str = "base"
     TTS_TIMEOUT_SECONDS: float = 120.0

@@ -110,7 +110,15 @@ services:
       - NVIDIA_NIM_MODEL=${NVIDIA_NIM_MODEL:-meta/llama-3.1-70b-instruct}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      # Speech generation: no-key Edge neural voices first, local Piper if
+      # Edge is unavailable. Set TTS_PROVIDER_ORDER=piper for offline-only.
+      - TTS_PROVIDER_ORDER=${TTS_PROVIDER_ORDER:-edge,piper}
+      - EDGE_TTS_VOICE=${EDGE_TTS_VOICE:-en-US-AriaNeural}
+      - EDGE_TTS_RATE=${EDGE_TTS_RATE:-+0%}
+      - EDGE_TTS_VOLUME=${EDGE_TTS_VOLUME:-+0%}
+      - EDGE_TTS_PITCH=${EDGE_TTS_PITCH:-+0Hz}
       - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/models/piper}
+      - TTS_TIMEOUT_SECONDS=${TTS_TIMEOUT_SECONDS:-120}
       - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-base}
       # Stock footage. At least one of these is required for the assemble
       # stage; they are tried in STOCK_PROVIDER_ORDER. Shutterstock is last
@@ -166,10 +174,9 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      # Piper voice models, kept out of the image because they are ~60MB
-      # each and swappable. Download one into ./models/piper; the URLs are
-      # in apps/api/Dockerfile. Without it the voiceover and assemble
-      # stages correctly report themselves unavailable.
+      # Optional Piper fallback voice models, kept out of the image because
+      # they are ~60MB each and swappable. Edge TTS works without this mount;
+      # offline-only narration needs a model downloaded into ./models/piper.
       - ./models/piper:/models/piper:ro
       # Renders are written here. A shared volume means the API can serve a
       # file the worker produced; without it they each see their own /tmp.
@@ -193,8 +200,8 @@ services:
       -Q generation,maintenance
     environment: *api_env
     volumes:
-      # The worker is what actually renders, so it needs both the voice
-      # model and the shared scratch space.
+      # The worker renders and therefore needs the optional Piper fallback
+      # model plus the shared scratch space.
       - ./models/piper:/models/piper:ro
       - media_work:/tmp/hydraclip
     depends_on:

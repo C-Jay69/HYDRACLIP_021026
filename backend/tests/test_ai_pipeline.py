@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,7 +19,9 @@ import pytest
 from apps.api.core.config import settings
 from apps.api.services.ai_pipeline import (
     AIPipeline,
+    EdgeTTS,
     FailoverLLM,
+    FailoverTTS,
     OllamaLLM,
     OpenAICompatibleLLM,
     PipelineError,
@@ -27,6 +30,7 @@ from apps.api.services.ai_pipeline import (
     StageUnavailable,
     WhisperSTT,
     _work_path,
+    build_tts,
     get_ai_pipeline,
 )
 
@@ -108,6 +112,44 @@ def test_piper_resolves_voices_under_the_configured_path(monkeypatch):
     assert tts.model_path == "/opt/voices/en_US-isley-medium.onnx"
 
 
+def test_edge_tts_uses_configured_default_and_accepts_full_voice_names(monkeypatch):
+    monkeypatch.setattr(settings, "EDGE_TTS_VOICE", "en-US-AvaNeural")
+    assert EdgeTTS(voice="lessac").voice == "en-US-AvaNeural"
+    assert EdgeTTS(voice="en-GB-SoniaNeural").voice == "en-GB-SoniaNeural"
+
+
+@pytest.mark.asyncio
+async def test_edge_tts_writes_mp3_without_an_api_key(monkeypatch, tmp_path):
+    calls: list[dict[str, str]] = []
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, **kwargs):
+            calls.append({"text": text, "voice": voice, **kwargs})
+
+        async def save(self, destination):
+            Path(destination).write_bytes(b"fake mp3 audio")
+
+    fake_module = MagicMock(Communicate=FakeCommunicate)
+    monkeypatch.setitem(sys.modules, "edge_tts", fake_module)
+    monkeypatch.setattr(settings, "EDGE_TTS_RATE", "+5%")
+
+    result = await EdgeTTS(voice="en-US-GuyNeural").synthesize_async(
+        "Hello HydraClip", str(tmp_path / "scene.wav")
+    )
+
+    assert result.endswith("scene.edge.mp3")
+    assert Path(result).read_bytes() == b"fake mp3 audio"
+    assert calls == [
+        {
+            "text": "Hello HydraClip",
+            "voice": "en-US-GuyNeural",
+            "rate": "+5%",
+            "volume": "+0%",
+            "pitch": "+0Hz",
+        }
+    ]
+
+
 def test_explicit_arguments_still_win(monkeypatch):
     monkeypatch.setattr(settings, "OLLAMA_MODEL", "mistral")
     assert OllamaLLM(model="phi3").model == "phi3"
@@ -164,6 +206,46 @@ async def test_llm_falls_back_from_openrouter_to_nvidia():
     assert await llm.generate("topic") == "fallback script"
     assert llm.last_provider == "NVIDIA NIM"
     assert llm.model == "meta/llama"
+
+
+@pytest.mark.asyncio
+async def test_tts_falls_back_from_edge_to_piper_and_stays_there():
+    edge = MagicMock()
+    edge.provider_name = "Edge TTS"
+    edge.availability_error.return_value = None
+    edge.synthesize_async = AsyncMock(side_effect=RuntimeError("network down"))
+
+    piper = MagicMock()
+    piper.provider_name = "Piper"
+    piper.availability_error.return_value = None
+    piper.synthesize_async = AsyncMock(side_effect=["first.wav", "second.wav"])
+
+    tts = FailoverTTS([edge, piper])
+    assert await tts.synthesize_async("first") == "first.wav"
+    assert await tts.synthesize_async("second") == "second.wav"
+    assert tts.last_provider == "Piper"
+    assert edge.synthesize_async.await_count == 1
+    assert piper.synthesize_async.await_count == 2
+
+
+def test_build_tts_defaults_to_edge_then_piper(monkeypatch):
+    monkeypatch.setattr(settings, "TTS_PROVIDER_ORDER", "edge,piper")
+    providers = build_tts().providers
+    assert [provider.provider_name for provider in providers] == ["Edge TTS", "Piper"]
+
+
+def test_tts_availability_reports_every_failed_provider():
+    edge = MagicMock()
+    edge.provider_name = "Edge TTS"
+    edge.availability_error.return_value = "package missing"
+    piper = MagicMock()
+    piper.provider_name = "Piper"
+    piper.availability_error.return_value = "model missing"
+
+    reason = FailoverTTS([edge, piper]).unavailable_reason()
+    assert reason is not None
+    assert "Edge TTS: package missing" in reason
+    assert "Piper: model missing" in reason
 
 
 # --- construction must stay cheap --------------------------------------------------
@@ -230,33 +312,31 @@ async def test_assembly_cannot_be_steered_by_the_topic():
 
 
 @pytest.mark.asyncio
-async def test_assembly_refuses_clearly_when_dependencies_are_missing():
+async def test_assembly_refuses_clearly_when_dependencies_are_missing(monkeypatch):
     """Was: returned {"status": "generated"} having written no file at all,
     so callers would be told a video existed when none had been rendered.
 
-    Assembly is implemented now, but it still needs ffmpeg, a voice model
-    and a stock provider. Missing any of those must produce an explanation
-    naming them, not a false success and not a bare traceback.
+    Assembly is implemented now, but it still needs a speech provider and a
+    stock provider. Missing either must produce a specific explanation, not a
+    false success and not a bare traceback.
     """
+    monkeypatch.setattr(settings, "TTS_PROVIDER_ORDER", "piper")
     pipeline = AIPipeline()
     with pytest.raises(StageUnavailable) as caught:
         await pipeline.create_video_from_script({"script": "A sentence.", "topic": "t"})
 
-    # Piper is missing here, and the message says exactly that rather than
-    # "assembly failed".
-    assert "piper" in str(caught.value)
+    assert "piper" in str(caught.value).lower()
 
 
 @pytest.mark.asyncio
-async def test_assembly_names_a_missing_stock_provider():
+async def test_assembly_names_a_missing_stock_provider(monkeypatch):
     """With narration available, the next missing piece is named in turn."""
+    monkeypatch.setattr(settings, "TTS_PROVIDER_ORDER", "edge")
+    monkeypatch.setattr(EdgeTTS, "availability_error", lambda self: None)
     pipeline = AIPipeline()
 
-    with patch.object(
-        PiperTTS, "unavailable_reason", classmethod(lambda cls, voice="lessac": None)
-    ):
-        with pytest.raises(StageUnavailable) as caught:
-            await pipeline.create_video_from_script({"script": "A sentence."})
+    with pytest.raises(StageUnavailable) as caught:
+        await pipeline.create_video_from_script({"script": "A sentence."})
 
     assert "PEXELS_API_KEY" in str(caught.value)
 

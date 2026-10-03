@@ -76,7 +76,7 @@ def ffprobe_path() -> str | None:
 def ffmpeg_unavailable_reason() -> str | None:
     """Why rendering cannot run, or None when it can.
 
-    Same shape as ``PiperTTS.unavailable_reason`` so the pipeline can report
+    Same shape as the TTS availability probe so the pipeline can report
     every missing dependency in one pass instead of discovering them one
     crash at a time.
     """
