@@ -25,8 +25,11 @@ from apps.api.core.config import settings
 logger = logging.getLogger(__name__)
 
 #: Domain separation, so a key derived for tokens cannot decrypt OAuth state.
-_TOKEN_CONTEXT = b"hydraclip.token.v1"
-_STATE_CONTEXT = b"hydraclip.oauth-state.v1"
+# These legacy byte strings are persistent cryptographic protocol identifiers,
+# not public branding. Changing them during a rename would make every stored
+# OAuth token undecryptable, so they must remain stable indefinitely.
+_TOKEN_CONTEXT = b"videoforce.token.v1"
+_STATE_CONTEXT = b"videoforce.oauth-state.v1"
 
 
 class DecryptionError(RuntimeError):
