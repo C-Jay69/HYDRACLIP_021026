@@ -39,8 +39,21 @@ Requirements: Docker with the Compose plugin.
 cd backend
 cp .env.example .env     # first run only; replace placeholders before use
 docker compose config --quiet
-docker compose build api
-docker compose up -d
+docker compose up -d --build
+```
+
+The normal stack starts Redis, Ollama, the API, workers, beat, and Flower. It
+uses `DATABASE_URL` and the `S3_*` settings for hosted services such as
+Supabase; it does not start or wait for local Postgres or MinIO. MinIO's
+official container images were discontinued, so object storage is either a
+configured external S3-compatible service or `STORAGE_BACKEND=local`.
+
+For a disposable local PostgreSQL container instead of an external database,
+set `DATABASE_URL=postgresql://hydraclip:secret@postgres:5432/hydraclip` and
+activate its profile:
+
+```bash
+docker compose --profile local-db up -d --build
 ```
 
 Apply database migrations and seed the plans/admin account:

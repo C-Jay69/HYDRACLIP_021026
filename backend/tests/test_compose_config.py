@@ -46,6 +46,34 @@ def test_api_honours_external_database_url():
     assert "postgres:5432/hydraclip" in database_url
 
 
+def test_hosted_services_do_not_force_obsolete_local_infrastructure():
+    services = _compose()["services"]
+
+    # MinIO stopped publishing official container images. Supabase/S3 users
+    # must not be blocked by Compose trying to pull a dead local dependency.
+    assert "minio" not in services
+    assert "minio-init" not in services
+    assert services["postgres"]["profiles"] == ["local-db"]
+
+    for service in ("api", "worker", "beat"):
+        dependencies = services[service].get("depends_on") or {}
+        assert "postgres" not in dependencies
+        assert "minio" not in dependencies
+        assert "minio-init" not in dependencies
+
+
+def test_optional_stock_keys_do_not_emit_compose_warnings():
+    environment = _environment("api")
+
+    for name in (
+        "PEXELS_API_KEY",
+        "PIXABAY_API_KEY",
+        "UNSPLASH_ACCESS_KEY",
+        "SHUTTERSTOCK_API_TOKEN",
+    ):
+        assert environment[name] == f"${{{name}:-}}"
+
+
 def test_api_honours_s3_and_supabase_storage_names():
     environment = _environment("api")
 
