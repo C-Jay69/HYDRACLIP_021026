@@ -13,7 +13,7 @@ export function Hero() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-muted-foreground">
             <Sparkles className="size-3.5 text-brand-bright" aria-hidden="true" />
-            Runs on local, open-source models — no paid model APIs
+            OpenRouter by default · NVIDIA NIM automatic fallback
           </span>
 
           <h1 className="mt-6 text-4xl leading-[1.08] font-extrabold tracking-tight text-balance sm:text-5xl lg:text-6xl">
@@ -22,13 +22,13 @@ export function Hero() {
 
           <p className="mx-auto mt-6 max-w-2xl text-lg text-pretty text-muted-foreground">
             HydraClip writes the script, picks the footage, records the voiceover and schedules the
-            upload — to YouTube, Instagram, TikTok and X. Everything generated locally, every clip
+            upload — to YouTube, Instagram, TikTok and X. Hosted or local AI, with every clip
             properly licensed.
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" className="w-full sm:w-auto" asChild>
-              <a href="#pricing">
+              <a href="/auth?mode=signup">
                 Start creating free
                 <ArrowRight className="size-4" aria-hidden="true" />
               </a>

@@ -43,6 +43,19 @@ class TestSettings:
         )
         assert settings.cors_origins == ["http://localhost:3000"]
 
+    def test_hosted_llm_defaults_to_openrouter_then_nvidia(self):
+        settings = Settings(_env_file=None)
+        assert settings.LLM_PROVIDER_ORDER == "openrouter,nvidia_nim,ollama"
+        assert settings.OPENROUTER_MODEL == "openrouter/auto"
+        assert settings.NVIDIA_NIM_BASE_URL == "https://integrate.api.nvidia.com/v1"
+
+    def test_new_and_legacy_supabase_auth_names_are_accepted(self, monkeypatch):
+        monkeypatch.setenv("PROJECT_URL", "https://project.supabase.co")
+        monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "publishable")
+        settings = Settings(_env_file=None)
+        assert settings.SUPABASE_URL == "https://project.supabase.co"
+        assert settings.SUPABASE_ANON_KEY == "publishable"
+
 
 class TestPackageLayout:
     @pytest.mark.parametrize(
@@ -105,7 +118,16 @@ class TestApp:
         response = client.get("/openapi.json")
         assert response.status_code == 200
         paths = response.json()["paths"]
-        for path in ["/auth/signup", "/auth/login", "/auth/refresh", "/auth/me", "/healthz"]:
+        for path in [
+            "/auth/signup",
+            "/auth/login",
+            "/auth/supabase/login",
+            "/auth/google/authorize",
+            "/auth/google/callback",
+            "/auth/refresh",
+            "/auth/me",
+            "/healthz",
+        ]:
             assert path in paths
 
     def test_stock_media_routes_are_still_mounted(self, client):

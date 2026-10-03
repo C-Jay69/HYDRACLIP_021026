@@ -123,10 +123,31 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = "admin@example.com"
     ADMIN_PASSWORD: str = "adminpass"
 
-    # --- Local AI models ----------------------------------------------------
+    # --- Text generation ----------------------------------------------------
+    # OpenRouter is the default. NVIDIA's hosted NIM is attempted next, and
+    # local Ollama remains an opt-in final fallback for offline deployments.
+    LLM_PROVIDER_ORDER: str = "openrouter,nvidia_nim,ollama"
+    LLM_TIMEOUT_SECONDS: float = 120.0
+
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_MODEL: str = "openrouter/auto"
+    OPENROUTER_HTTP_REFERER: str = ""
+    OPENROUTER_APP_TITLE: str = "HydraClip"
+
+    NVIDIA_NIM_API_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices("NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"),
+    )
+    NVIDIA_NIM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
+    NVIDIA_NIM_MODEL: str = "meta/llama-3.1-70b-instruct"
+
+    # Optional local fallback.
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.2"
     OLLAMA_TIMEOUT_SECONDS: float = 120.0
+
+    # --- Local speech/media models -----------------------------------------
     PIPER_MODEL_PATH: str = "/models/piper"
     WHISPER_MODEL_SIZE: str = "base"
     TTS_TIMEOUT_SECONDS: float = 120.0
@@ -174,6 +195,26 @@ class Settings(BaseSettings):
     # --- Application URLs ---------------------------------------------------
     APP_URL: str = "http://localhost:3000"
     NEXT_PUBLIC_APP_URL: str = "http://localhost:3000"
+
+    # --- Login providers ----------------------------------------------------
+    # Supabase Auth handles email/password verification. Both legacy anon
+    # keys and the newer publishable-key spelling are accepted.
+    SUPABASE_URL: str = Field(
+        default="",
+        validation_alias=AliasChoices("SUPABASE_URL", "PROJECT_URL"),
+    )
+    SUPABASE_ANON_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEY", "ANON_KEY"
+        ),
+    )
+    SUPABASE_AUTH_TIMEOUT_SECONDS: float = 20.0
+
+    # Google login reuses the same OAuth web client credentials as YouTube,
+    # but requires its own authorized callback URI in Google Cloud.
+    GOOGLE_LOGIN_REDIRECT_URI: str = "http://localhost:8000/auth/google/callback"
+    GOOGLE_LOGIN_TICKET_SECONDS: int = 120
 
     # --- Stock media --------------------------------------------------------
     SHUTTERSTOCK_API_TOKEN: str = ""

@@ -26,13 +26,14 @@ import jwt
 
 from apps.api.core.config import settings
 
-TokenType = Literal["access", "refresh"]
+TokenType = Literal["access", "refresh", "login_ticket"]
 
 __all__ = [
     "hash_password",
     "verify_password",
     "create_access_token",
     "create_refresh_token",
+    "create_login_ticket",
     "decode_token",
     "TokenError",
 ]
@@ -107,6 +108,15 @@ def create_refresh_token(
         subject,
         "refresh",
         expires_in if expires_in is not None else settings.REFRESH_TOKEN_EXPIRES_IN,
+    )
+
+
+def create_login_ticket(subject: str | int) -> str:
+    """Short-lived ticket carried only in an HttpOnly Google-login cookie."""
+    return _create_token(
+        subject,
+        "login_ticket",
+        settings.GOOGLE_LOGIN_TICKET_SECONDS,
     )
 
 

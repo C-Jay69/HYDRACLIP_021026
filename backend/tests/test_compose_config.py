@@ -70,6 +70,28 @@ def test_optional_monitoring_cannot_block_core_startup():
     assert flower["image"] != "celery/flower:latest"
 
 
+def test_hosted_llm_is_default_and_ollama_is_opt_in():
+    services = _compose()["services"]
+    environment = _environment("api")
+
+    assert services["ollama"]["profiles"] == ["local-llm"]
+    assert environment["LLM_PROVIDER_ORDER"].startswith(
+        "${LLM_PROVIDER_ORDER:-openrouter,nvidia_nim,ollama}"
+    )
+    assert environment["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY:-}"
+    assert "NVIDIA_API_KEY" in environment["NVIDIA_NIM_API_KEY"]
+
+
+def test_login_provider_settings_are_forwarded():
+    environment = _environment("api")
+
+    assert "PROJECT_URL" in environment["SUPABASE_URL"]
+    assert "SUPABASE_PUBLISHABLE_KEY" in environment["SUPABASE_ANON_KEY"]
+    assert environment["GOOGLE_LOGIN_REDIRECT_URI"].startswith(
+        "${GOOGLE_LOGIN_REDIRECT_URI:-"
+    )
+
+
 def test_optional_stock_keys_do_not_emit_compose_warnings():
     environment = _environment("api")
 

@@ -67,3 +67,21 @@ class TokenPair(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserPublic
+
+
+class ExternalAccessTokenRequest(BaseModel):
+    access_token: str = Field(min_length=1)
+
+
+class ExternalAuthResult(BaseModel):
+    authenticated: bool
+    requires_email_confirmation: bool = False
+    message: str
+    tokens: TokenPair | None = None
+
+
+class AuthProviders(BaseModel):
+    supabase_email: bool
+    google: bool
+    google_authorize_path: str = "/auth/google/authorize"
+    detail: dict[str, str | None]

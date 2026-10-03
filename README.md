@@ -42,11 +42,31 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-The normal stack starts Redis, Ollama, the API, workers, and beat. It uses
-`DATABASE_URL` and the `S3_*` settings for hosted services such as Supabase; it
-does not start or wait for local Postgres or MinIO. MinIO's official container
-images were discontinued, so object storage is either a configured external
-S3-compatible service or `STORAGE_BACKEND=local`.
+The normal stack starts Redis, the API, workers, and beat. It uses
+`DATABASE_URL`, Supabase Auth, hosted LLMs, and the `S3_*` settings without
+forcing local substitutes. It does not start or wait for local Postgres, MinIO,
+Ollama, or Flower. MinIO's official container images were discontinued, so
+object storage is either a configured external S3-compatible service or
+`STORAGE_BACKEND=local`.
+
+Text generation defaults to OpenRouter (`openrouter/auto`), automatically falls
+back to NVIDIA NIM, and can optionally fall back to local Ollama. Configure only
+private server-side environment variables—never put provider keys in frontend
+code:
+
+```dotenv
+LLM_PROVIDER_ORDER=openrouter,nvidia_nim,ollama
+OPENROUTER_API_KEY=your-private-key
+OPENROUTER_MODEL=openrouter/auto
+NVIDIA_NIM_API_KEY=your-private-key
+NVIDIA_NIM_MODEL=meta/llama-3.1-70b-instruct
+```
+
+Start the optional local fallback only when needed:
+
+```bash
+docker compose --profile local-llm up -d ollama
+```
 
 Flower is optional monitoring—not an application dependency. Start its current
 documented image only when you want the dashboard at http://localhost:5555:
@@ -62,6 +82,47 @@ activate its profile:
 ```bash
 docker compose --profile local-db up -d --build
 ```
+
+## Login configuration
+
+The web login page is `/auth`. Email/password is verified by Supabase Auth;
+after verification HydraClip issues its own API token pair and synchronizes the
+user by normalized email. Put the project URL and **publishable/anon** key in
+`backend/.env` (never the service-role key):
+
+```dotenv
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your-publishable-or-anon-key
+```
+
+In Supabase Dashboard:
+
+1. Open **Authentication → Providers → Email** and enable email/password.
+2. Open **Authentication → URL Configuration** and set the local Site URL to
+   `http://localhost:3000`; add `http://localhost:3000/auth` to allowed redirects.
+3. Decide whether **Confirm email** is enabled. When enabled, HydraClip tells the
+   user to confirm before signing in instead of pretending signup completed.
+
+Google login directly reuses `YOUTUBE_CLIENT_ID` and
+`YOUTUBE_CLIENT_SECRET`; it requests only `openid email profile`, while the
+separate YouTube connection still requests upload permission. In the same
+Google Cloud **Web application** OAuth client, keep the YouTube callback and add
+the login callback as a second Authorized redirect URI:
+
+```text
+http://localhost:8000/oauth/youtube/callback
+http://localhost:8000/auth/google/callback
+```
+
+Also keep `http://localhost:3000` as an Authorized JavaScript origin, then set:
+
+```dotenv
+GOOGLE_LOGIN_REDIRECT_URI=http://localhost:8000/auth/google/callback
+```
+
+Production values must use the real HTTPS API/app hosts and match Google Cloud
+exactly. Do not paste client secrets or populated `.env` files into issues or
+chat.
 
 Apply database migrations and seed the plans/admin account:
 
@@ -86,4 +147,4 @@ make install
 make test
 ```
 
-See `backend/.env.example` for Supabase PostgreSQL, S3-compatible storage, stock-media, OAuth, Ollama, and Piper settings.
+See `backend/.env.example` for Supabase PostgreSQL/Auth, S3-compatible storage, OpenRouter/NVIDIA/Ollama, stock-media, OAuth, and Piper settings.

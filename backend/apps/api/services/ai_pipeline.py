@@ -1,4 +1,4 @@
-"""Local-first AI pipeline: Ollama (LLM), Piper (TTS), Whisper (STT), FFmpeg.
+"""HydraClip AI pipeline: hosted LLM failover, Piper TTS, Whisper, and FFmpeg.
 
 Nothing in this module was reachable before: no caller existed anywhere in the
 codebase, and ``generate_script`` raised ``AttributeError`` on its own return
@@ -151,6 +151,169 @@ class OllamaLLM:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+
+class OpenAICompatibleLLM:
+    """Chat-completions client shared by OpenRouter and NVIDIA NIM."""
+
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.provider_name = provider_name
+        self.base_url = base_url.rstrip("/") + "/"
+        self.api_key = api_key.strip()
+        self.model = model
+        self.timeout = settings.LLM_TIMEOUT_SECONDS
+        self.headers = headers or {}
+        self._client: Optional[httpx.AsyncClient] = None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        return self._client
+
+    def configuration_error(self) -> str | None:
+        if not self.api_key:
+            return f"{self.provider_name} API key is not configured"
+        if not self.model:
+            return f"{self.provider_name} model is not configured"
+        return None
+
+    async def generate(
+        self,
+        prompt: str,
+        system: str | None = None,
+        max_tokens: int = 500,
+        temperature: float = 0.7,
+    ) -> str:
+        problem = self.configuration_error()
+        if problem:
+            raise StageUnavailable(problem)
+
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        response = await self.client.post(
+            "chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                **self.headers,
+            },
+            json={
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+        response.raise_for_status()
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise PipelineError(
+                f"{self.provider_name} returned an invalid chat-completions response"
+            ) from exc
+        if not isinstance(content, str) or not content.strip():
+            raise PipelineError(f"{self.provider_name} returned an empty response")
+        return content.strip()
+
+    async def unavailable_reason(self) -> Optional[str]:
+        return self.configuration_error()
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+
+class FailoverLLM:
+    """Try configured LLM providers in order, failing over on provider errors."""
+
+    def __init__(self, providers: list[Any]) -> None:
+        self.providers = providers
+        self.last_provider: str | None = None
+        self.last_model: str | None = None
+
+    @property
+    def model(self) -> str:
+        if self.last_model:
+            return self.last_model
+        for provider in self.providers:
+            if not getattr(provider, "configuration_error", lambda: None)():
+                return provider.model
+        return self.providers[0].model if self.providers else "unconfigured"
+
+    async def generate(self, *args, **kwargs) -> str:
+        failures: list[str] = []
+        for provider in self.providers:
+            problem = getattr(provider, "configuration_error", lambda: None)()
+            if problem:
+                failures.append(problem)
+                continue
+            try:
+                result = await provider.generate(*args, **kwargs)
+            except (httpx.HTTPError, PipelineError) as exc:
+                failures.append(f"{provider.provider_name}: {type(exc).__name__}: {exc}")
+                continue
+            self.last_provider = provider.provider_name
+            self.last_model = provider.model
+            return result
+
+        detail = "; ".join(failures) or "no LLM providers were configured"
+        raise StageUnavailable(f"Text generation is unavailable ({detail}).")
+
+    async def unavailable_reason(self) -> Optional[str]:
+        reasons: list[str] = []
+        for provider in self.providers:
+            problem = await provider.unavailable_reason()
+            if problem is None:
+                return None
+            reasons.append(problem)
+        return "Text generation is unavailable: " + "; ".join(reasons)
+
+    async def close(self) -> None:
+        for provider in self.providers:
+            await provider.close()
+
+
+def build_llm(ollama_model: str | None = None) -> FailoverLLM:
+    """Build the configured OpenRouter -> NVIDIA NIM -> Ollama chain."""
+    available = {
+        "openrouter": OpenAICompatibleLLM(
+            provider_name="OpenRouter",
+            base_url=settings.OPENROUTER_BASE_URL,
+            api_key=settings.OPENROUTER_API_KEY,
+            model=settings.OPENROUTER_MODEL,
+            headers={
+                "HTTP-Referer": settings.OPENROUTER_HTTP_REFERER or settings.APP_URL,
+                "X-OpenRouter-Title": settings.OPENROUTER_APP_TITLE,
+            },
+        ),
+        "nvidia_nim": OpenAICompatibleLLM(
+            provider_name="NVIDIA NIM",
+            base_url=settings.NVIDIA_NIM_BASE_URL,
+            api_key=settings.NVIDIA_NIM_API_KEY,
+            model=settings.NVIDIA_NIM_MODEL,
+        ),
+        "ollama": OllamaLLM(model=ollama_model),
+    }
+    # Match the hosted clients' small compatibility surface.
+    available["ollama"].provider_name = "Ollama"
+    available["ollama"].configuration_error = lambda: None
+
+    order = [name.strip().lower() for name in settings.LLM_PROVIDER_ORDER.split(",")]
+    providers = [available[name] for name in order if name in available]
+    return FailoverLLM(providers or [available["openrouter"], available["nvidia_nim"]])
 
 
 class PiperTTS:
@@ -494,15 +657,16 @@ class AIPipeline:
     def __init__(self,
                  llm_model: str = None,
                  tts_model_path: str = None,
-                 stt_model_size: str = None):
-        self.llm = OllamaLLM(model=llm_model)
+                 stt_model_size: str = None,
+                 llm: Any = None):
+        self.llm = llm or build_llm(ollama_model=llm_model)
         self.tts = PiperTTS(model_path=tts_model_path)
         self.stt = WhisperSTT(model_size=stt_model_size)
         self.ffmpeg = FFmpegProcessor()
 
     async def generate_script(self, topic: str, style: str = "short_form",
                              duration: int = 60) -> Dict[str, Any]:
-        """Generate a video script using Ollama.
+        """Generate a video script using the configured LLM failover chain.
         
         Args:
             topic: Video topic

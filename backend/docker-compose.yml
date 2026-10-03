@@ -33,7 +33,10 @@ services:
   # pull or wait for a local object store. Use STORAGE_BACKEND=local for local
   # renders, or configure the S3_* settings for a real bucket.
 
+  # Optional final LLM fallback. OpenRouter and NVIDIA NIM are the default
+  # hosted chain, so the large Ollama image is never pulled unless requested.
   ollama:
+    profiles: ["local-llm"]
     image: ollama/ollama:latest
     volumes:
       - ollama_models:/root/.ollama
@@ -93,7 +96,19 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-adminpass}
-      - OLLAMA_BASE_URL=http://ollama:11434
+      # Text generation: OpenRouter first, NVIDIA NIM second, local Ollama
+      # only when its profile is explicitly started.
+      - LLM_PROVIDER_ORDER=${LLM_PROVIDER_ORDER:-openrouter,nvidia_nim,ollama}
+      - LLM_TIMEOUT_SECONDS=${LLM_TIMEOUT_SECONDS:-120}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openrouter/auto}
+      - OPENROUTER_HTTP_REFERER=${OPENROUTER_HTTP_REFERER:-${APP_URL:-http://localhost:3000}}
+      - OPENROUTER_APP_TITLE=${OPENROUTER_APP_TITLE:-HydraClip}
+      - NVIDIA_NIM_API_KEY=${NVIDIA_NIM_API_KEY:-${NVIDIA_API_KEY:-}}
+      - NVIDIA_NIM_BASE_URL=${NVIDIA_NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      - NVIDIA_NIM_MODEL=${NVIDIA_NIM_MODEL:-meta/llama-3.1-70b-instruct}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
       - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/models/piper}
       - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-base}
@@ -114,6 +129,15 @@ services:
       - APP_URL=${APP_URL:-http://localhost:3000}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      # Supabase verifies email/password; HydraClip exchanges the verified
+      # identity for its normal first-party API tokens.
+      - SUPABASE_URL=${SUPABASE_URL:-${PROJECT_URL:-}}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-${SUPABASE_PUBLISHABLE_KEY:-${ANON_KEY:-}}}
+      - SUPABASE_AUTH_TIMEOUT_SECONDS=${SUPABASE_AUTH_TIMEOUT_SECONDS:-20}
+      # Google login reuses the YouTube OAuth web client, with this additional
+      # callback registered in Google Cloud.
+      - GOOGLE_LOGIN_REDIRECT_URI=${GOOGLE_LOGIN_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
+      - GOOGLE_LOGIN_TICKET_SECONDS=${GOOGLE_LOGIN_TICKET_SECONDS:-120}
       # Social OAuth values must be explicitly forwarded: Compose uses .env
       # for interpolation, but does not otherwise inject every .env key into
       # the container.

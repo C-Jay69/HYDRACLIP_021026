@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -18,7 +18,9 @@ import pytest
 from apps.api.core.config import settings
 from apps.api.services.ai_pipeline import (
     AIPipeline,
+    FailoverLLM,
     OllamaLLM,
+    OpenAICompatibleLLM,
     PipelineError,
     PiperTTS,
     StageNotImplemented,
@@ -111,6 +113,59 @@ def test_explicit_arguments_still_win(monkeypatch):
     assert OllamaLLM(model="phi3").model == "phi3"
 
 
+@pytest.mark.asyncio
+async def test_openai_compatible_client_uses_chat_completions_shape():
+    captured: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "A finished script"}}]},
+        )
+
+    llm = OpenAICompatibleLLM(
+        provider_name="OpenRouter",
+        base_url="https://openrouter.example/api/v1",
+        api_key="test-key",
+        model="openrouter/auto",
+    )
+    llm._client = httpx.AsyncClient(
+        base_url=llm.base_url, transport=httpx.MockTransport(respond)
+    )
+    try:
+        result = await llm.generate("topic", system="write", max_tokens=42)
+    finally:
+        await llm.close()
+
+    assert result == "A finished script"
+    assert captured[0].url.path == "/api/v1/chat/completions"
+    assert captured[0].headers["authorization"] == "Bearer test-key"
+    body = json.loads(captured[0].content)
+    assert body["model"] == "openrouter/auto"
+    assert body["max_tokens"] == 42
+
+
+@pytest.mark.asyncio
+async def test_llm_falls_back_from_openrouter_to_nvidia():
+    primary = MagicMock()
+    primary.provider_name = "OpenRouter"
+    primary.model = "openrouter/auto"
+    primary.configuration_error.return_value = None
+    primary.generate = AsyncMock(side_effect=httpx.ConnectError("primary down"))
+
+    fallback = MagicMock()
+    fallback.provider_name = "NVIDIA NIM"
+    fallback.model = "meta/llama"
+    fallback.configuration_error.return_value = None
+    fallback.generate = AsyncMock(return_value="fallback script")
+
+    llm = FailoverLLM([primary, fallback])
+    assert await llm.generate("topic") == "fallback script"
+    assert llm.last_provider == "NVIDIA NIM"
+    assert llm.model == "meta/llama"
+
+
 # --- construction must stay cheap --------------------------------------------------
 
 
@@ -121,14 +176,15 @@ def test_whisper_does_not_load_the_model_at_construction():
 
 
 def test_pipeline_construction_does_not_open_an_http_client():
-    """An AsyncClient built in __init__ binds to whichever event loop is
-    current at construction time, which for a singleton is the wrong one."""
+    """Provider clients are lazy so the singleton cannot bind the wrong loop."""
     pipeline = AIPipeline()
-    assert pipeline.llm._client is None
+    assert isinstance(pipeline.llm, FailoverLLM)
+    assert all(provider._client is None for provider in pipeline.llm.providers)
 
-    client = pipeline.llm.client
+    provider = pipeline.llm.providers[0]
+    client = provider.client
     assert isinstance(client, httpx.AsyncClient)
-    assert pipeline.llm.client is client  # cached
+    assert provider.client is client  # cached
 
 
 @pytest.mark.asyncio
