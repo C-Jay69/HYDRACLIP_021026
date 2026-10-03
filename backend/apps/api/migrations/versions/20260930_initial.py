@@ -6,6 +6,7 @@ Revises:
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # Alembic requires these module-level identifiers to build the migration
 # chain. Without them `alembic upgrade head` aborts before running anything,
@@ -17,21 +18,39 @@ depends_on = None
 
 
 def upgrade():
-    # Create enum types first
-    user_role = sa.Enum("USER", "ADMIN", name="user_role")
-    user_role.create(op.get_bind(), checkfirst=True)
+    # Create enum types once, then tell the table-bound enum objects not to
+    # emit CREATE TYPE again.  PostgreSQL's normal table-create event does not
+    # use checkfirst, so pre-creating a plain sa.Enum and then using another
+    # plain sa.Enum in a column fails with DuplicateObject.
+    user_role = postgresql.ENUM("USER", "ADMIN", name="user_role", create_type=False)
+    subscription_status = postgresql.ENUM(
+        "active", "cancelled", "past_due", name="subscription_status", create_type=False
+    )
+    schedule_status = postgresql.ENUM(
+        "pending",
+        "running",
+        "completed",
+        "cancelled",
+        "failed",
+        name="schedule_status",
+        create_type=False,
+    )
+    published_post_status = postgresql.ENUM(
+        "pending", "published", "failed", name="published_post_status", create_type=False
+    )
+    video_job_status = postgresql.ENUM(
+        "pending", "running", "completed", "failed", name="video_job_status", create_type=False
+    )
 
-    subscription_status = sa.Enum("active", "cancelled", "past_due", name="subscription_status")
-    subscription_status.create(op.get_bind(), checkfirst=True)
-
-    schedule_status = sa.Enum("pending", "running", "completed", "cancelled", "failed", name="schedule_status")
-    schedule_status.create(op.get_bind(), checkfirst=True)
-
-    published_post_status = sa.Enum("pending", "published", "failed", name="published_post_status")
-    published_post_status.create(op.get_bind(), checkfirst=True)
-
-    video_job_status = sa.Enum("pending", "running", "completed", "failed", name="video_job_status")
-    video_job_status.create(op.get_bind(), checkfirst=True)
+    bind = op.get_bind()
+    for enum_type in (
+        user_role,
+        subscription_status,
+        schedule_status,
+        published_post_status,
+        video_job_status,
+    ):
+        enum_type.create(bind, checkfirst=True)
 
     # Create tables
     op.create_table(
@@ -71,7 +90,7 @@ def upgrade():
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("stripe_subscription_id", sa.String(), nullable=False),
         sa.Column("plan_id", sa.Integer(), nullable=False),
-        sa.Column("status", sa.Enum("active", "cancelled", "past_due", name="subscription_status"), nullable=False, server_default="active"),
+        sa.Column("status", subscription_status, nullable=False, server_default="active"),
         sa.Column("current_period_start", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
         sa.Column("current_period_end", sa.DateTime(), nullable=False),
         sa.Column("cancel_at_period_end", sa.Boolean(), nullable=False, server_default="false"),
@@ -134,7 +153,7 @@ def upgrade():
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("video_id", sa.Integer(), nullable=False),
         sa.Column("job_type", sa.String(), nullable=False),
-        sa.Column("status", sa.Enum("pending", "running", "completed", "failed", name="video_job_status"), nullable=False, server_default="pending"),
+        sa.Column("status", video_job_status, nullable=False, server_default="pending"),
         sa.Column("progress_pct", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("celery_task_id", sa.String()),
         sa.Column("error_message", sa.Text()),
@@ -153,7 +172,7 @@ def upgrade():
         sa.Column("platform", sa.String(), nullable=False),
         sa.Column("scheduled_at", sa.DateTime(), nullable=False),
         sa.Column("timezone", sa.String(), nullable=False, server_default="UTC"),
-        sa.Column("status", sa.Enum("pending", "running", "completed", "cancelled", "failed", name="schedule_status"), nullable=False, server_default="pending"),
+        sa.Column("status", schedule_status, nullable=False, server_default="pending"),
         sa.Column("platform_post_id", sa.String()),
         sa.Column("platform_url", sa.String()),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
@@ -175,7 +194,7 @@ def upgrade():
         sa.Column("title", sa.String()),
         sa.Column("description", sa.Text()),
         sa.Column("tags", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("status", sa.Enum("pending", "published", "failed", name="published_post_status"), nullable=False, server_default="pending"),
+        sa.Column("status", published_post_status, nullable=False, server_default="pending"),
         sa.Column("published_at", sa.DateTime()),
         sa.Column("error_message", sa.Text()),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
