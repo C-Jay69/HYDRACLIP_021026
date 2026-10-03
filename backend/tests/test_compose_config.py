@@ -62,6 +62,14 @@ def test_hosted_services_do_not_force_obsolete_local_infrastructure():
         assert "minio-init" not in dependencies
 
 
+def test_optional_monitoring_cannot_block_core_startup():
+    flower = _compose()["services"]["flower"]
+
+    assert flower["profiles"] == ["monitoring"]
+    assert flower["image"] == "mher/flower:2.2.0"
+    assert flower["image"] != "celery/flower:latest"
+
+
 def test_optional_stock_keys_do_not_emit_compose_warnings():
     environment = _environment("api")
 

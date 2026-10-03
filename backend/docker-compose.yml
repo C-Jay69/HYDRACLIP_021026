@@ -200,8 +200,12 @@ services:
         condition: service_healthy
 
 
+  # Optional queue-monitoring dashboard. The old celery/flower repository no
+  # longer exists; mher/flower is the image documented by Flower itself.
+  # Keeping it behind a profile means monitoring can never block the core app.
   flower:
-    image: celery/flower:latest
+    profiles: ["monitoring"]
+    image: mher/flower:2.2.0
     environment:
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}

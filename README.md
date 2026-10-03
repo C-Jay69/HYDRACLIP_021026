@@ -42,11 +42,18 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-The normal stack starts Redis, Ollama, the API, workers, beat, and Flower. It
-uses `DATABASE_URL` and the `S3_*` settings for hosted services such as
-Supabase; it does not start or wait for local Postgres or MinIO. MinIO's
-official container images were discontinued, so object storage is either a
-configured external S3-compatible service or `STORAGE_BACKEND=local`.
+The normal stack starts Redis, Ollama, the API, workers, and beat. It uses
+`DATABASE_URL` and the `S3_*` settings for hosted services such as Supabase; it
+does not start or wait for local Postgres or MinIO. MinIO's official container
+images were discontinued, so object storage is either a configured external
+S3-compatible service or `STORAGE_BACKEND=local`.
+
+Flower is optional monitoring—not an application dependency. Start its current
+documented image only when you want the dashboard at http://localhost:5555:
+
+```bash
+docker compose --profile monitoring up -d flower
+```
 
 For a disposable local PostgreSQL container instead of an external database,
 set `DATABASE_URL=postgresql://hydraclip:secret@postgres:5432/hydraclip` and
