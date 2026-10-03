@@ -70,6 +70,12 @@ def test_optional_monitoring_cannot_block_core_startup():
     assert flower["image"] != "celery/flower:latest"
 
 
+def test_beat_does_not_inherit_the_api_http_healthcheck():
+    # Beat has no HTTP server. Inheriting the Dockerfile's /healthz probe makes
+    # a functioning scheduler transition from "starting" to "unhealthy".
+    assert _compose()["services"]["beat"]["healthcheck"] == {"disable": True}
+
+
 def test_hosted_llm_is_default_and_ollama_is_opt_in():
     services = _compose()["services"]
     environment = _environment("api")

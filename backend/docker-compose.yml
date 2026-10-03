@@ -222,6 +222,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # The shared API image probes http://localhost:8000 by default, but beat
+    # runs only the scheduler and intentionally exposes no HTTP server. Disable
+    # that inherited probe rather than permanently marking a healthy beat as
+    # unhealthy.
+    healthcheck:
+      disable: true
 
 
   # Optional queue-monitoring dashboard. The old celery/flower repository no
