@@ -22,6 +22,7 @@ import {
   saveSession,
   SESSION_KEY,
 } from "@/auth-session";
+import { AuthPage } from "@/components/AuthPage";
 import { LandingPage } from "@/components/landing/LandingPage";
 import { SiteHeader } from "@/components/landing/SiteHeader";
 
@@ -45,6 +46,16 @@ Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
   writable: true,
 });
+
+// AuthPage reads window.location.search during render; supply the minimal
+// shape that code path needs (effects never run under renderToStaticMarkup).
+if (typeof window === "undefined") {
+  Object.defineProperty(globalThis, "window", {
+    value: { location: { search: "" } },
+    configurable: true,
+    writable: true,
+  });
+}
 
 const DEMO_USER = { id: 7, email: "ada@example.com", name: "Ada Lovelace" };
 
@@ -198,5 +209,48 @@ describe("landing page regression: no login prompt when signed in", () => {
     expect(html).toContain("Sign in");
     expect(html).toContain("Get started");
     expect(html).not.toContain("Sign out");
+  });
+
+  test("signed-in visitors see no signup funnel anywhere on the page", () => {
+    storeDemoSession();
+    const html = renderToStaticMarkup(
+      <AuthSessionProvider>
+        <LandingPage />
+      </AuthSessionProvider>,
+    );
+
+    // Hero, pricing and the bottom CTA must not route a signed-in user to the
+    // account-creation form again.
+    expect(html).not.toContain("mode=signup");
+    expect(html).toContain("Continue to HydraClip");
+  });
+});
+
+describe("auth page respects an existing session", () => {
+  test("a signed-in visitor is greeted, not asked for credentials", () => {
+    storeDemoSession();
+    const html = renderToStaticMarkup(
+      <AuthSessionProvider>
+        <AuthPage />
+      </AuthSessionProvider>,
+    );
+
+    expect(html).toContain("Signed in as ada@example.com");
+    expect(html).toContain("Continue to HydraClip");
+    expect(html).toContain("Use a different account");
+    expect(html).not.toContain('type="password"');
+  });
+
+  test("an anonymous visitor still gets the login and signup tabs", () => {
+    const html = renderToStaticMarkup(
+      <AuthSessionProvider>
+        <AuthPage />
+      </AuthSessionProvider>,
+    );
+
+    expect(html).not.toContain("Signed in as");
+    expect(html).not.toContain("Use a different account");
+    expect(html).toContain("Sign in");
+    expect(html).toContain("Create account");
   });
 });

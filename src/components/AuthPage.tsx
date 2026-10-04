@@ -1,4 +1,4 @@
-import { saveSession, type TokenPair } from "@/auth-session";
+import { saveSession, useAuthSession, type TokenPair } from "@/auth-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +30,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function AuthPage({ callback = false }: { callback?: boolean }) {
+  const session = useAuthSession();
   const params = new URLSearchParams(window.location.search);
   const initialMode: AuthMode = params.get("mode") === "signup" ? "signup" : "login";
   const [mode, setMode] = useState<AuthMode>(initialMode);
@@ -109,6 +110,18 @@ export function AuthPage({ callback = false }: { callback?: boolean }) {
     }
   }
 
+  // Signed in either just now (fresh tokens above) or from a restored
+  // session — anyone reaching /auth already authenticated must never be
+  // asked for credentials again.
+  const signedIn = authenticated || session.status === "authenticated";
+
+  function useDifferentAccount() {
+    setAuthenticated(false);
+    setMessage("");
+    setError("");
+    void session.signOut();
+  }
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-6 py-12">
       <section className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl sm:p-8">
@@ -127,13 +140,21 @@ export function AuthPage({ callback = false }: { callback?: boolean }) {
           <div className="flex items-center gap-3 rounded-lg border border-border bg-background p-4" role="status">
             <Loader2 className="size-5 animate-spin" /> Completing Google login…
           </div>
-        ) : authenticated ? (
+        ) : signedIn ? (
           <div className="space-y-5">
             <div className="flex items-start gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4">
               <CheckCircle2 className="mt-0.5 size-5 text-emerald-400" />
-              <div><p className="font-medium">You’re signed in</p><p className="text-sm text-muted-foreground">{message}</p></div>
+              <div>
+                <p className="font-medium">You’re signed in</p>
+                <p className="text-sm text-muted-foreground">
+                  {message || `Signed in as ${session.user?.email ?? "your HydraClip account"}.`}
+                </p>
+              </div>
             </div>
             <Button className="w-full" asChild><a href="/">Continue to HydraClip</a></Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={useDifferentAccount}>
+              Use a different account
+            </Button>
           </div>
         ) : (
           <>
@@ -173,7 +194,7 @@ export function AuthPage({ callback = false }: { callback?: boolean }) {
           </>
         )}
 
-        {message && !authenticated && <p className="mt-5 rounded-lg border border-brand/40 bg-brand/10 p-3 text-sm" role="status">{message}</p>}
+        {message && !signedIn && <p className="mt-5 rounded-lg border border-brand/40 bg-brand/10 p-3 text-sm" role="status">{message}</p>}
         {error && <p className="mt-5 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive" role="alert">{error}</p>}
       </section>
     </main>

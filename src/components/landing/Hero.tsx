@@ -1,3 +1,4 @@
+import { useAuthSession } from "@/auth-session";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, PlayCircle, Sparkles } from "lucide-react";
 
@@ -7,6 +8,9 @@ import { PLATFORM_LABELS, PlatformIcon, type Platform } from "./PlatformIcon";
 const PLATFORMS: Platform[] = ["youtube", "instagram", "tiktok", "x"];
 
 export function Hero() {
+  const session = useAuthSession();
+  const signedIn = session.status === "authenticated";
+
   return (
     <section id="top" className="relative px-6 pt-20 pb-16 md:pt-28 md:pb-24">
       <div className="mx-auto max-w-7xl">
@@ -28,8 +32,8 @@ export function Hero() {
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" className="w-full sm:w-auto" asChild>
-              <a href="/auth?mode=signup">
-                Start creating free
+              <a href={signedIn ? "/auth" : "/auth?mode=signup"}>
+                {signedIn ? "Continue to HydraClip" : "Start creating free"}
                 <ArrowRight className="size-4" aria-hidden="true" />
               </a>
             </Button>

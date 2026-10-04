@@ -1,3 +1,4 @@
+import { useAuthSession } from "@/auth-session";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Check, Minus } from "lucide-react";
@@ -61,6 +62,8 @@ const PLANS: Plan[] = [
 
 export function Pricing() {
   const [billing, setBilling] = useState<Billing>("monthly");
+  const session = useAuthSession();
+  const signedIn = session.status === "authenticated";
 
   return (
     <section id="pricing" className="border-t border-border px-6 py-20 md:py-28">
@@ -158,7 +161,9 @@ export function Pricing() {
                   variant={plan.featured ? "default" : "outline"}
                   asChild
                 >
-                  <a href="/auth?mode=signup">{plan.cta}</a>
+                  <a href={signedIn ? "/auth" : "/auth?mode=signup"}>
+                    {signedIn ? "Continue to HydraClip" : plan.cta}
+                  </a>
                 </Button>
               </div>
             );
