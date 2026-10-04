@@ -32,8 +32,8 @@ export function Hero() {
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" className="w-full sm:w-auto" asChild>
-              <a href={signedIn ? "/auth" : "/auth?mode=signup"}>
-                {signedIn ? "Continue to HydraClip" : "Start creating free"}
+              <a href={signedIn ? "/dashboard" : "/auth?mode=signup"}>
+                {signedIn ? "Open your dashboard" : "Start creating free"}
                 <ArrowRight className="size-4" aria-hidden="true" />
               </a>
             </Button>

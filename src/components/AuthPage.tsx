@@ -151,7 +151,7 @@ export function AuthPage({ callback = false }: { callback?: boolean }) {
                 </p>
               </div>
             </div>
-            <Button className="w-full" asChild><a href="/">Continue to HydraClip</a></Button>
+            <Button className="w-full" asChild><a href="/dashboard">Continue to HydraClip</a></Button>
             <Button type="button" variant="ghost" className="w-full" onClick={useDifferentAccount}>
               Use a different account
             </Button>

@@ -161,8 +161,8 @@ export function Pricing() {
                   variant={plan.featured ? "default" : "outline"}
                   asChild
                 >
-                  <a href={signedIn ? "/auth" : "/auth?mode=signup"}>
-                    {signedIn ? "Continue to HydraClip" : plan.cta}
+                  <a href={signedIn ? "/dashboard" : "/auth?mode=signup"}>
+                    {signedIn ? "Open your dashboard" : plan.cta}
                   </a>
                 </Button>
               </div>

@@ -23,6 +23,7 @@ import {
   SESSION_KEY,
 } from "@/auth-session";
 import { AuthPage } from "@/components/AuthPage";
+import { DashboardPage } from "@/components/DashboardPage";
 import { LandingPage } from "@/components/landing/LandingPage";
 import { SiteHeader } from "@/components/landing/SiteHeader";
 
@@ -142,12 +143,13 @@ describe("session storage helpers", () => {
 });
 
 describe("site header reflects the persisted session", () => {
-  test("signed-in visitors see their identity and Sign out, not login prompts", () => {
+  test("signed-in visitors see identity, Dashboard and Sign out, not login prompts", () => {
     storeDemoSession();
     const html = renderHeader();
 
     expect(html).toContain("Ada Lovelace");
     expect(html).toContain("Sign out");
+    expect(html).toContain('href="/dashboard"');
     expect(html).not.toContain("Sign in");
     expect(html).not.toContain("Get started");
     expect(html).not.toContain('href="/auth"');
@@ -211,7 +213,7 @@ describe("landing page regression: no login prompt when signed in", () => {
     expect(html).not.toContain("Sign out");
   });
 
-  test("signed-in visitors see no signup funnel anywhere on the page", () => {
+  test("signed-in visitors are funnelled to the dashboard, never back to /auth", () => {
     storeDemoSession();
     const html = renderToStaticMarkup(
       <AuthSessionProvider>
@@ -219,10 +221,12 @@ describe("landing page regression: no login prompt when signed in", () => {
       </AuthSessionProvider>,
     );
 
-    // Hero, pricing and the bottom CTA must not route a signed-in user to the
-    // account-creation form again.
+    // Hero, pricing, the bottom CTA and the header must route a signed-in user
+    // to the app — never to the login form or account-creation again.
     expect(html).not.toContain("mode=signup");
-    expect(html).toContain("Continue to HydraClip");
+    expect(html).not.toContain('href="/auth"');
+    expect(html).toContain('href="/dashboard"');
+    expect(html).toContain("Open your dashboard");
   });
 });
 
@@ -237,6 +241,7 @@ describe("auth page respects an existing session", () => {
 
     expect(html).toContain("Signed in as ada@example.com");
     expect(html).toContain("Continue to HydraClip");
+    expect(html).toContain('href="/dashboard"');
     expect(html).toContain("Use a different account");
     expect(html).not.toContain('type="password"');
   });
@@ -252,5 +257,35 @@ describe("auth page respects an existing session", () => {
     expect(html).not.toContain("Use a different account");
     expect(html).toContain("Sign in");
     expect(html).toContain("Create account");
+  });
+});
+
+describe("dashboard page: the destination that ends the landing/auth loop", () => {
+  test("signed-in users get a personalised workspace with the media library", () => {
+    storeDemoSession();
+    const html = renderToStaticMarkup(
+      <AuthSessionProvider>
+        <DashboardPage />
+      </AuthSessionProvider>,
+    );
+
+    expect(html).toContain("Welcome back");
+    expect(html).toContain("Ada Lovelace");
+    expect(html).toContain("Sign out");
+    expect(html).toContain('id="dashboard-media"');
+    expect(html).not.toContain("You’re not signed in");
+  });
+
+  test("anonymous visitors get a guard card pointing to sign in, not the app", () => {
+    const html = renderToStaticMarkup(
+      <AuthSessionProvider>
+        <DashboardPage />
+      </AuthSessionProvider>,
+    );
+
+    expect(html).toContain("You’re not signed in");
+    expect(html).toContain('href="/auth"');
+    expect(html).not.toContain('id="dashboard-media"');
+    expect(html).not.toContain("Welcome back");
   });
 });

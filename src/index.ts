@@ -88,7 +88,9 @@ async function proxyAuth(request: Request, backendPath: string) {
   if (authorization) headers.set("authorization", authorization);
 
   try {
-    const upstream = await fetch(new URL(backendPath, API_BASE_URL), {
+    // Forward the query string too (/api/projects pagination params, etc.).
+    const query = new URL(request.url).search;
+    const upstream = await fetch(new URL(backendPath + query, API_BASE_URL), {
       method: request.method,
       headers,
       body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
@@ -118,10 +120,11 @@ const server = serve({
   port: Number(process.env.PORT ?? 3000),
 
   routes: {
-    // Landing and authentication pages.
+    // Landing, authentication and signed-in app pages.
     "/": index,
     "/auth": index,
     "/auth/callback": index,
+    "/dashboard": index,
 
     // Same-origin auth proxy: browser code never has to call localhost:8000
     // directly, and HttpOnly Google callback tickets remain usable.
@@ -135,6 +138,9 @@ const server = serve({
     "/api/auth/me": (req) => proxyAuth(req, "/auth/me"),
     "/api/auth/refresh": (req) => proxyAuth(req, "/auth/refresh"),
     "/api/auth/logout": (req) => proxyAuth(req, "/auth/logout"),
+
+    // Dashboard data.
+    "/api/projects": (req) => proxyAuth(req, "/projects"),
 
     "/hydraclip_logo.png": () =>
       new Response(Bun.file(PUBLIC_LOGO_URL), {

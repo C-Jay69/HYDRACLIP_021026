@@ -32,8 +32,8 @@ export function CallToAction() {
           {session.status === "authenticated" ? (
             <div className="mx-auto mt-8 flex max-w-md justify-center">
               <Button size="lg" asChild>
-                <a href="/auth">
-                  Continue to HydraClip
+                <a href="/dashboard">
+                  Open your dashboard
                   <ArrowRight className="size-4" aria-hidden="true" />
                 </a>
               </Button>

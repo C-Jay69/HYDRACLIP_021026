@@ -59,6 +59,9 @@ export function SiteHeader() {
               <CircleUserRound className="size-4 shrink-0" aria-hidden="true" />
               <span className="truncate">{signedInLabel}</span>
             </span>
+            <Button asChild>
+              <a href="/dashboard">Dashboard</a>
+            </Button>
             <Button variant="ghost" onClick={() => void session.signOut()}>
               Sign out
             </Button>
@@ -107,6 +110,11 @@ export function SiteHeader() {
                     <CircleUserRound className="size-4 shrink-0" aria-hidden="true" />
                     <span className="truncate">{signedInLabel}</span>
                   </span>
+                  <Button asChild>
+                    <a href="/dashboard" onClick={() => setOpen(false)}>
+                      Dashboard
+                    </a>
+                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => {
