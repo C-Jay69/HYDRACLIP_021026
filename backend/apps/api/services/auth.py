@@ -26,7 +26,7 @@ import jwt
 
 from apps.api.core.config import settings
 
-TokenType = Literal["access", "refresh", "login_ticket"]
+TokenType = Literal["access", "refresh", "login_ticket", "password_reset"]
 
 __all__ = [
     "hash_password",
@@ -34,6 +34,7 @@ __all__ = [
     "create_access_token",
     "create_refresh_token",
     "create_login_ticket",
+    "create_password_reset_token",
     "decode_token",
     "TokenError",
 ]
@@ -118,6 +119,16 @@ def create_login_ticket(subject: str | int) -> str:
         "login_ticket",
         settings.GOOGLE_LOGIN_TICKET_SECONDS,
     )
+
+
+def create_password_reset_token(subject: str | int, expires_in: int) -> str:
+    """Short-lived token carried in a password-reset link.
+
+    Single-use enforcement lives in ``apps.api.services.password_reset``,
+    which records the token's ``jti`` once it has been consumed. Here we only
+    mint the signed, self-expiring string.
+    """
+    return _create_token(subject, "password_reset", expires_in)
 
 
 def decode_token(token: str, expected_type: TokenType | None = None) -> dict[str, Any]:

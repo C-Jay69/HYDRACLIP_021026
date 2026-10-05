@@ -315,6 +315,10 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
+    #: Envelope sender for outbound email. A default is required because
+    #: password reset builds the message header unconditionally once a real
+    #: SMTP_HOST is configured; a missing attribute used to crash the endpoint.
+    SMTP_FROM: str = "no-reply@hydracclip.local"
 
     @field_validator("DATABASE_URL")
     @classmethod

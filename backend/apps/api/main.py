@@ -18,9 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.core.config import settings
 from apps.api.routers import (
+    admin,
     auth,
+    billing,
     generation,
     oauth,
+    passwords,
     projects,
     schedules,
     shutterstock,
@@ -82,6 +85,9 @@ def create_app() -> FastAPI:
     app.include_router(shutterstock.router)
     app.include_router(oauth.router)
     app.include_router(schedules.router)
+    app.include_router(passwords.router)
+    app.include_router(billing.router)
+    app.include_router(admin.router)
 
     # Chooses between the in-process runner and Celery. Done at app creation
     # so the choice (and the warning for "inline") is visible in the logs at

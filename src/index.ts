@@ -139,6 +139,19 @@ const server = serve({
     "/api/auth/refresh": (req) => proxyAuth(req, "/auth/refresh"),
     "/api/auth/logout": (req) => proxyAuth(req, "/auth/logout"),
 
+    // Password reset (public endpoints; rate limited server side).
+    "/api/auth/forgot-password": (req) => proxyAuth(req, "/auth/forgot-password"),
+    "/api/auth/reset-password": (req) => proxyAuth(req, "/auth/reset-password"),
+
+    // Billing. Wildcard so checkout/portal/overview all proxy with their
+    // exact suffix path and query string.
+    "/api/billing/*": (req) =>
+      proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
+
+    // Admin panel. Same wildcard approach; the API enforces the ADMIN role.
+    "/api/admin/*": (req) =>
+      proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
+
     // Dashboard data.
     "/api/projects": (req) => proxyAuth(req, "/projects"),
 
