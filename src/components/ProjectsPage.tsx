@@ -223,7 +223,7 @@ export function ProjectsPage() {
 
   return (
     <main className="min-h-screen bg-background">
-      <WorkspaceNav active="/dashboard" />
+      <WorkspaceNav active="/projects" />
       <div className="mx-auto max-w-7xl space-y-10 px-6 py-10">
         <section aria-labelledby="projects-heading">
           <div className="flex items-center gap-2.5">

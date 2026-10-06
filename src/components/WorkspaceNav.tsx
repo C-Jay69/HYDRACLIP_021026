@@ -13,9 +13,10 @@ import { CircleUserRound } from "lucide-react";
 import brandMark from "../assets/hydraclip-mark.webp";
 
 const APP_LINKS = [
-  { href: "/dashboard", label: "Projects" },
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/projects", label: "Projects" },
   { href: "/schedule", label: "Schedule" },
-  { href: "/accounts", label: "Accounts" },
+  { href: "/connect", label: "Accounts" },
   { href: "/billing", label: "Billing" },
   { href: "/profile", label: "Profile" },
 ] as const;
