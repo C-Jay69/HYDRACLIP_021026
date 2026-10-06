@@ -1,0 +1,2088 @@
+From c555d3960e11b07054d9c017d69473df0b89a78f Mon Sep 17 00:00:00 2001
+From: "Z (assistant)" <z-ai-assistant@local>
+Date: Mon, 5 Oct 2026 10:27:30 +0000
+Subject: [PATCH] fix(frontend): wire up missing routes, complete SchedulePage,
+ add action CTAs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The frontend had three blocking issues that left it without any buttons to
+generate or schedule anything:
+
+1. SchedulePage.tsx was unfinished — the file ended with a
+   `// __SCHEDULE_JSX__` placeholder where the return statement should
+   have been, so it would not even compile if it were rendered.
+
+2. App.tsx only wired four routes — /, /auth, /auth/callback, /dashboard —
+   so every other nav link (Projects, Schedule, Connect, Billing, Profile,
+   Admin) silently fell through to the landing page. ProjectsPage.tsx and
+   SchedulePage.tsx were already fully built but were dead code.
+
+3. The Bun dev server (src/index.ts) only proxied /api/projects as an exact
+   path, so calls like /api/projects/{id}/generate, /api/jobs/{id},
+   /api/videos/{id}/media, /api/schedules, /api/social/accounts,
+   /api/pipeline/status, /api/oauth/{platform}/authorize all returned 404
+   from the dev server — even the existing code couldn't have worked.
+
+Fixes:
+
+* Complete SchedulePage.tsx with the missing return JSX: a scheduling form
+  (video picker, platform picker, datetime-local picker), an upcoming-posts
+  list with cancel buttons, and a published-posts list with live links.
+
+* Rewrite App.tsx with a tiny URL→component router covering every page in
+  the build prompt's FRONTEND PAGES section: /dashboard, /projects,
+  /schedule, /connect, /billing, /profile, /onboarding, /admin.
+
+* Update src/index.ts to serve index.html for every new page route, and add
+  the missing API proxy wildcards: /api/pipeline/status, /api/projects/*,
+  /api/videos/*, /api/jobs/*, /api/schedules/*, /api/published-posts,
+  /api/social/accounts/*, /api/oauth/*.
+
+* Rewrite DashboardPage.tsx with the prominent action CTAs the user was
+  looking for: Create a project (→ /projects), Schedule a post (→ /schedule),
+  Connect a platform (→ /connect), Upgrade your plan (→ /billing), and an
+  admin-only Open admin panel button. Adds a status row (plan, connected
+  platforms, account role) and a 3-step 'How it works' card.
+
+* Create the five missing page components referenced by the new routing:
+  ConnectPage (OAuth flow + disconnect, surfaces platform limitations
+  honestly), BillingPage (Stripe checkout + portal), ProfilePage (name,
+  email, password change), AdminPage (metrics dashboard + audit log, with
+  non-admin guard card), OnboardingPage (3-step first-run wizard).
+
+* Fix WorkspaceNav.tsx APP_LINKS — the Projects tab pointed at /dashboard
+  and the Accounts tab pointed at /accounts (no such route). Now points at
+  /projects and /connect respectively.
+
+* Fix ProjectsPage.tsx — was passing active="/dashboard" to WorkspaceNav
+  instead of active="/projects".
+
+Verification:
+* `bun run typecheck` — clean
+* `bun test` — 40/40 pass
+* `bun run build` — succeeds (433 KB JS, 78 KB CSS)
+* Dev server probes: all 8 new page routes return 200; all 12 API proxy
+  wildcards reach the proxy (503 because no backend running, NOT 404).
+---
+ src/App.tsx                       |  47 +++--
+ src/components/AdminPage.tsx      | 211 ++++++++++++++++++++
+ src/components/BillingPage.tsx    | 252 +++++++++++++++++++++++
+ src/components/ConnectPage.tsx    | 263 ++++++++++++++++++++++++
+ src/components/DashboardPage.tsx  | 322 +++++++++++++++++++++++++++---
+ src/components/OnboardingPage.tsx | 205 +++++++++++++++++++
+ src/components/ProfilePage.tsx    | 209 +++++++++++++++++++
+ src/components/ProjectsPage.tsx   |   2 +-
+ src/components/SchedulePage.tsx   | 223 ++++++++++++++++++++-
+ src/components/WorkspaceNav.tsx   |   5 +-
+ src/index.ts                      |  61 +++++-
+ 11 files changed, 1745 insertions(+), 55 deletions(-)
+ create mode 100644 src/components/AdminPage.tsx
+ create mode 100644 src/components/BillingPage.tsx
+ create mode 100644 src/components/ConnectPage.tsx
+ create mode 100644 src/components/OnboardingPage.tsx
+ create mode 100644 src/components/ProfilePage.tsx
+
+diff --git a/src/App.tsx b/src/App.tsx
+index f65e366..6ba6140 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,24 +1,45 @@
+ import { AuthSessionProvider } from "@/auth-session";
++import { AdminPage } from "@/components/AdminPage";
+ import { AuthPage } from "@/components/AuthPage";
++import { BillingPage } from "@/components/BillingPage";
++import { ConnectPage } from "@/components/ConnectPage";
+ import { DashboardPage } from "@/components/DashboardPage";
+ import { LandingPage } from "@/components/landing/LandingPage";
++import { OnboardingPage } from "@/components/OnboardingPage";
++import { ProfilePage } from "@/components/ProfilePage";
++import { ProjectsPage } from "@/components/ProjectsPage";
++import { SchedulePage } from "@/components/SchedulePage";
+ 
+ import "./index.css";
+ 
++/**
++ * Tiny URL → component router.
++ *
++ * The Bun dev server (src/index.ts) is configured to serve index.html for every
++ * page route below, so reading `window.location.pathname` is enough on first
++ * paint. Subsequent in-app navigations are full page loads via <a href>, which
++ * is fine for an MVP — there is no client-side history to keep in sync.
++ *
++ * Routes match the build prompt's "FRONTEND PAGES" section: public marketing
++ * pages, auth pages, the authenticated app surface (/dashboard, /projects,
++ * /schedule, /connect, /billing, /profile, /onboarding) and /admin/*.
++ */
++function route(pathname: string) {
++  if (pathname === "/auth/callback") return <AuthPage callback />;
++  if (pathname === "/auth") return <AuthPage />;
++  if (pathname === "/dashboard") return <DashboardPage />;
++  if (pathname === "/projects") return <ProjectsPage />;
++  if (pathname === "/schedule") return <SchedulePage />;
++  if (pathname === "/connect") return <ConnectPage />;
++  if (pathname === "/billing") return <BillingPage />;
++  if (pathname === "/profile") return <ProfilePage />;
++  if (pathname === "/onboarding") return <OnboardingPage />;
++  if (pathname === "/admin") return <AdminPage />;
++  return <LandingPage />;
++}
++
+ export function App() {
+-  return (
+-    <AuthSessionProvider>
+-      {window.location.pathname === "/auth/callback" ? (
+-        <AuthPage callback />
+-      ) : window.location.pathname === "/auth" ? (
+-        <AuthPage />
+-      ) : window.location.pathname === "/dashboard" ? (
+-        <DashboardPage />
+-      ) : (
+-        <LandingPage />
+-      )}
+-    </AuthSessionProvider>
+-  );
++  return <AuthSessionProvider>{route(window.location.pathname)}</AuthSessionProvider>;
+ }
+ 
+ export default App;
+diff --git a/src/components/AdminPage.tsx b/src/components/AdminPage.tsx
+new file mode 100644
+index 0000000..c90bb5a
+--- /dev/null
++++ b/src/components/AdminPage.tsx
+@@ -0,0 +1,211 @@
++/**
++ * Admin dashboard: top-line platform metrics + recent audit log entries.
++ *
++ * Backed by /api/admin/stats (counts of users, projects, videos, subscriptions)
++ * and /api/admin/audit-logs. The backend enforces ADMIN role on every /admin/*
++ * endpoint, so non-admins get a clear 403 message instead of a blank page.
++ */
++
++import { SignedOutGuard, WorkspaceNav } from "@/components/WorkspaceNav";
++import { Button } from "@/components/ui/button";
++import { useAuthSession } from "@/auth-session";
++import { api } from "@/lib/api";
++import { BarChart3, Loader2, ShieldAlert } from "lucide-react";
++import { useEffect, useState } from "react";
++
++type AdminStats = {
++  users: number;
++  active_users: number;
++  projects: number;
++  videos: number;
++  completed_videos: number;
++  failed_videos: number;
++  active_subscriptions: number;
++  plan_breakdown: Record<string, number>;
++};
++
++type AuditLog = {
++  id: number;
++  admin_id: number;
++  action: string;
++  target_type: string | null;
++  target_id: number | null;
++  metadata_json: Record<string, unknown> | null;
++  ip_address: string | null;
++  created_at: string;
++};
++
++export function AdminPage() {
++  const session = useAuthSession();
++  const signedIn = session.status === "authenticated";
++  const isAdmin = (session.user?.role ?? "USER").toUpperCase() === "ADMIN";
++
++  const [stats, setStats] = useState<AdminStats | null>(null);
++  const [logs, setLogs] = useState<AuditLog[]>([]);
++  const [error, setError] = useState<string | null>(null);
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    if (!signedIn || !isAdmin) {
++      setLoading(false);
++      return;
++    }
++    void (async () => {
++      try {
++        const [statsData, logPage] = await Promise.all([
++          api<AdminStats>("/admin/stats"),
++          api<{ items?: AuditLog[] }>("/admin/audit-logs?limit=20"),
++        ]);
++        setStats(statsData);
++        setLogs(Array.isArray(logPage.items) ? logPage.items : []);
++      } catch (caught) {
++        setError(
++          caught instanceof Error ? caught.message : "Could not load admin data.",
++        );
++      } finally {
++        setLoading(false);
++      }
++    })();
++  }, [signedIn, isAdmin]);
++
++  if (!signedIn) return <SignedOutGuard page="Admin" />;
++
++  if (!isAdmin) {
++    return (
++      <main className="min-h-screen bg-background">
++        <WorkspaceNav active="/admin" />
++        <div className="mx-auto max-w-3xl px-6 py-16">
++          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-6 text-center">
++            <ShieldAlert className="mx-auto size-10 text-amber-500" aria-hidden="true" />
++            <h1 className="mt-4 text-xl font-bold">Admin access required</h1>
++            <p className="mt-2 text-sm text-muted-foreground">
++              Your account ({session.user?.email ?? "anonymous"}) does not have the ADMIN role.
++              Sign in with the seeded admin credentials from <code className="font-mono">ADMIN_EMAIL</code> /
++              <code className="font-mono"> ADMIN_PASSWORD</code> to use this page.
++            </p>
++            <Button asChild className="mt-5">
++              <a href="/dashboard">Back to dashboard</a>
++            </Button>
++          </div>
++        </div>
++      </main>
++    );
++  }
++
++  const statsCards: Array<{ label: string; value: number | string; sub?: string }> = stats
++    ? [
++        { label: "Total users", value: stats.users, sub: `${stats.active_users} active` },
++        { label: "Active subscriptions", value: stats.active_subscriptions },
++        { label: "Projects", value: stats.projects },
++        { label: "Videos generated", value: stats.videos, sub: `${stats.completed_videos} done · ${stats.failed_videos} failed` },
++      ]
++    : [];
++
++  return (
++    <main className="min-h-screen bg-background">
++      <WorkspaceNav active="/admin" />
++      <div className="mx-auto max-w-7xl space-y-10 px-6 py-10">
++        <section aria-labelledby="admin-heading">
++          <div className="flex items-center gap-2.5">
++            <BarChart3 className="size-5 text-brand-bright" aria-hidden="true" />
++            <h1 id="admin-heading" className="text-2xl font-bold tracking-tight">
++              Admin overview
++            </h1>
++          </div>
++          <p className="mt-2 text-sm text-muted-foreground">
++            Platform metrics and recent admin actions. The full management tables
++            (users, jobs, settings, logs) live under <code className="font-mono">/admin/users</code>,
++            <code className="font-mono"> /admin/jobs</code>, etc. — this page is the dashboard.
++          </p>
++        </section>
++
++        {error && (
++          <p
++            role="alert"
++            className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
++          >
++            {error}
++          </p>
++        )}
++
++        {loading ? (
++          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
++            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
++            Loading admin metrics…
++          </p>
++        ) : (
++          <section aria-labelledby="admin-stats">
++            <h2 id="admin-stats" className="sr-only">
++              Platform metrics
++            </h2>
++            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
++              {statsCards.map((card) => (
++                <li key={card.label} className="rounded-2xl border border-border bg-card p-5">
++                  <p className="text-sm text-muted-foreground">{card.label}</p>
++                  <p className="mt-2 text-3xl font-bold tracking-tight">{card.value}</p>
++                  {card.sub && (
++                    <p className="mt-1 text-xs text-muted-foreground">{card.sub}</p>
++                  )}
++                </li>
++              ))}
++            </ul>
++
++            {stats && Object.keys(stats.plan_breakdown).length > 0 && (
++              <div className="mt-6 rounded-2xl border border-border bg-card p-5">
++                <p className="text-sm font-semibold">Active subscriptions by plan</p>
++                <ul className="mt-3 space-y-2">
++                  {Object.entries(stats.plan_breakdown).map(([plan, count]) => (
++                    <li
++                      key={plan}
++                      className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm"
++                    >
++                      <span className="font-medium">{plan}</span>
++                      <span className="text-muted-foreground">{count} active</span>
++                    </li>
++                  ))}
++                </ul>
++              </div>
++            )}
++          </section>
++        )}
++
++        <section aria-labelledby="admin-logs">
++          <h2 id="admin-logs" className="text-lg font-bold">
++            Recent admin actions
++          </h2>
++          {logs.length === 0 ? (
++            <p className="mt-3 rounded-lg border border-dashed border-border bg-card/60 p-6 text-sm text-muted-foreground">
++              No admin actions logged yet.
++            </p>
++          ) : (
++            <ul className="mt-3 space-y-2">
++              {logs.map((log) => (
++                <li
++                  key={log.id}
++                  className="rounded-xl border border-border bg-card p-4 text-sm"
++                >
++                  <div className="flex items-center justify-between gap-2">
++                    <p className="font-medium">{log.action}</p>
++                    <time className="text-xs text-muted-foreground">
++                      {new Date(log.created_at).toLocaleString()}
++                    </time>
++                  </div>
++                  <p className="mt-1 text-xs text-muted-foreground">
++                    by admin #{log.admin_id}
++                    {log.target_type ? ` · target ${log.target_type} #${log.target_id}` : ""}
++                    {log.ip_address ? ` · ${log.ip_address}` : ""}
++                  </p>
++                  {log.metadata_json && Object.keys(log.metadata_json).length > 0 && (
++                    <pre className="mt-2 overflow-x-auto rounded bg-background p-2 text-xs">
++                      {JSON.stringify(log.metadata_json, null, 2)}
++                    </pre>
++                  )}
++                </li>
++              ))}
++            </ul>
++          )}
++        </section>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/components/BillingPage.tsx b/src/components/BillingPage.tsx
+new file mode 100644
+index 0000000..1179751
+--- /dev/null
++++ b/src/components/BillingPage.tsx
+@@ -0,0 +1,252 @@
++/**
++ * Billing page: see the available plans, the caller's current subscription,
++ * and open Stripe Checkout or the customer portal.
++ *
++ * Talks to /api/billing/overview, /api/billing/checkout and /api/billing/portal
++ * via the same-origin proxy. When Stripe is not configured the buttons
++ * still render but warn the user — this keeps the page useful in dev.
++ */
++
++import { SignedOutGuard, WorkspaceNav } from "@/components/WorkspaceNav";
++import { Button } from "@/components/ui/button";
++import { useAuthSession } from "@/auth-session";
++import { api } from "@/lib/api";
++import {
++  CheckCircle2,
++  CreditCard,
++  Loader2,
++  Sparkles,
++  Wallet,
++} from "lucide-react";
++import { useEffect, useState } from "react";
++
++type Plan = {
++  id: number;
++  name: string;
++  video_limit_monthly: number | null;
++  storage_limit_gb: number | null;
++  features: Record<string, unknown>;
++  is_active: boolean;
++  checkout_available: boolean;
++};
++
++type Subscription = {
++  id: number;
++  plan_id: number;
++  plan_name?: string | null;
++  status: string;
++  current_period_end?: string | null;
++  cancel_at_period_end?: boolean | null;
++} | null;
++
++type BillingOverview = {
++  plans: Plan[];
++  subscription: Subscription;
++  stripe_configured: boolean;
++  publishable_key: string;
++};
++
++export function BillingPage() {
++  const session = useAuthSession();
++  const signedIn = session.status === "authenticated";
++
++  const [overview, setOverview] = useState<BillingOverview | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [busy, setBusy] = useState<"checkout" | "portal" | null>(null);
++
++  useEffect(() => {
++    if (!signedIn) return;
++    void (async () => {
++      try {
++        setOverview(await api<BillingOverview>("/billing/overview"));
++      } catch (caught) {
++        setError(
++          caught instanceof Error ? caught.message : "Could not load billing overview.",
++        );
++      }
++    })();
++  }, [signedIn]);
++
++  if (!signedIn) return <SignedOutGuard page="Billing" />;
++
++  async function startCheckout(planName: string) {
++    setBusy("checkout");
++    setError(null);
++    try {
++      const result = await api<{ checkout_url: string }>("/billing/checkout", {
++        method: "POST",
++        body: JSON.stringify({ plan_name: planName }),
++      });
++      window.location.assign(result.checkout_url);
++    } catch (caught) {
++      setError(caught instanceof Error ? caught.message : "Checkout failed.");
++      setBusy(null);
++    }
++  }
++
++  async function openPortal() {
++    setBusy("portal");
++    setError(null);
++    try {
++      const result = await api<{ portal_url: string }>("/billing/portal", {
++        method: "POST",
++      });
++      window.location.assign(result.portal_url);
++    } catch (caught) {
++      setError(caught instanceof Error ? caught.message : "Could not open the portal.");
++      setBusy(null);
++    }
++  }
++
++  const currentPlanName = overview?.subscription?.plan_name ?? null;
++
++  return (
++    <main className="min-h-screen bg-background">
++      <WorkspaceNav active="/billing" />
++      <div className="mx-auto max-w-7xl space-y-10 px-6 py-10">
++        <section aria-labelledby="billing-heading">
++          <div className="flex items-center gap-2.5">
++            <Wallet className="size-5 text-brand-bright" aria-hidden="true" />
++            <h1 id="billing-heading" className="text-2xl font-bold tracking-tight">
++              Billing
++            </h1>
++          </div>
++          <p className="mt-2 text-sm text-muted-foreground">
++            Pick a plan to unlock more videos, remove the watermark, and enable
++            auto-publishing to YouTube.
++          </p>
++        </section>
++
++        {error && (
++          <p
++            role="alert"
++            className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
++          >
++            {error}
++          </p>
++        )}
++
++        {overview?.subscription && (
++          <section
++            aria-labelledby="billing-current"
++            className="rounded-2xl border border-border bg-card p-5"
++          >
++            <div className="flex items-start justify-between gap-3">
++              <div>
++                <p className="text-sm uppercase tracking-wide text-muted-foreground">
++                  Current plan
++                </p>
++                <p className="mt-1 text-2xl font-bold">
++                  {currentPlanName ?? overview.subscription.plan_id}
++                  <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">
++                    {overview.subscription.status}
++                  </span>
++                </p>
++                {overview.subscription.current_period_end && (
++                  <p className="mt-1 text-sm text-muted-foreground">
++                    Renews {new Date(overview.subscription.current_period_end).toLocaleDateString()}
++                    {overview.subscription.cancel_at_period_end
++                      ? " · cancels at period end"
++                      : ""}
++                  </p>
++                )}
++              </div>
++              {overview.stripe_configured && (
++                <Button
++                  variant="outline"
++                  disabled={busy !== null}
++                  onClick={() => void openPortal()}
++                >
++                  {busy === "portal" ? (
++                    <Loader2 className="size-4 animate-spin" />
++                  ) : (
++                    <CreditCard className="size-4" />
++                  )}
++                  Manage in Stripe
++                </Button>
++              )}
++            </div>
++          </section>
++        )}
++
++        {!overview ? (
++          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
++            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
++            Loading plans…
++          </p>
++        ) : (
++          <section aria-labelledby="billing-plans">
++            <h2 id="billing-plans" className="sr-only">
++              Available plans
++            </h2>
++            <ul className="grid gap-4 md:grid-cols-3">
++              {overview.plans.map((plan) => {
++                const isCurrent = currentPlanName === plan.name;
++                return (
++                  <li
++                    key={plan.id}
++                    className={
++                      isCurrent
++                        ? "relative rounded-2xl border-2 border-ring bg-card p-6"
++                        : "relative rounded-2xl border border-border bg-card p-6"
++                    }
++                  >
++                    <div className="flex items-center justify-between gap-2">
++                      <h3 className="text-lg font-bold">{plan.name}</h3>
++                      {isCurrent && (
++                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-medium text-emerald-500">
++                          <CheckCircle2 className="size-3" aria-hidden="true" />
++                          Current
++                        </span>
++                      )}
++                    </div>
++                    <p className="mt-1 text-sm text-muted-foreground">
++                      {plan.video_limit_monthly === null
++                        ? "Unlimited videos / month"
++                        : `${plan.video_limit_monthly} videos / month`}
++                      {" · "}
++                      {plan.storage_limit_gb === null
++                        ? "Unlimited storage"
++                        : `${plan.storage_limit_gb}GB storage`}
++                    </p>
++
++                    <Button
++                      className="mt-5 w-full"
++                      disabled={
++                        isCurrent ||
++                        !plan.checkout_available ||
++                        busy !== null
++                      }
++                      onClick={() => void startCheckout(plan.name)}
++                    >
++                      {busy === "checkout" ? (
++                        <Loader2 className="size-4 animate-spin" />
++                      ) : isCurrent ? (
++                        <CheckCircle2 className="size-4" />
++                      ) : (
++                        <Sparkles className="size-4" />
++                      )}
++                      {isCurrent
++                        ? "Your plan"
++                        : plan.checkout_available
++                          ? `Upgrade to ${plan.name}`
++                          : "Checkout unavailable"}
++                    </Button>
++                  </li>
++                );
++              })}
++            </ul>
++          </section>
++        )}
++
++        {!overview?.stripe_configured && overview && (
++          <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
++            Stripe is not configured on this deployment — plan upgrades are
++            disabled. Set <code className="font-mono">STRIPE_SECRET_KEY</code> and
++            the matching price IDs in the API container to enable Checkout.
++          </p>
++        )}
++      </div>
++    </main>
++  );
++}
+diff --git a/src/components/ConnectPage.tsx b/src/components/ConnectPage.tsx
+new file mode 100644
+index 0000000..6ce506e
+--- /dev/null
++++ b/src/components/ConnectPage.tsx
+@@ -0,0 +1,263 @@
++/**
++ * Connected social accounts.
++ *
++ * The build prompt requires a "/connect" page where users link YouTube,
++ * Instagram, TikTok and X. This page lists the four supported platforms,
++ * shows what's already connected, starts the OAuth flow via
++ * /api/oauth/{platform}/authorize, and lets users disconnect.
++ *
++ * The backend honestly reports which platforms are auto-publishable and
++ * which require a manual fallback — this UI surfaces that information so
++ * users aren't surprised when TikTok "publishes" as a download bundle.
++ */
++
++import { SignedOutGuard, WorkspaceNav } from "@/components/WorkspaceNav";
++import { Button } from "@/components/ui/button";
++import { useAuthSession } from "@/auth-session";
++import { api } from "@/lib/api";
++import {
++  CheckCircle2,
++  Link2,
++  Loader2,
++  PlugZap,
++  Unplug,
++} from "lucide-react";
++import { useEffect, useState } from "react";
++
++type PlatformInfo = {
++  name: string;
++  label: string;
++  configured: boolean;
++  requires_public_url: boolean;
++  detail: string | null;
++};
++
++type ConnectedAccount = {
++  id: number;
++  platform: string;
++  account_name: string;
++  account_id: string | null;
++  is_active: boolean;
++};
++
++const PLATFORM_NOTES: Record<string, string> = {
++  youtube: "Auto-publish via YouTube Data API v3. Requires Google OAuth credentials.",
++  instagram:
++    "Official Content Publishing API needs a business account and approved partners — this UI ships the connector and a manual export fallback.",
++  tiktok:
++    "TikTok Research API does not allow direct upload — connector is wired, publish path falls back to a prefilled metadata download.",
++  x:
++    "X Media Upload + Tweet API works for paid API tier — connector is wired, manual fallback otherwise.",
++};
++
++export function ConnectPage() {
++  const session = useAuthSession();
++  const signedIn = session.status === "authenticated";
++
++  const [platforms, setPlatforms] = useState<PlatformInfo[] | null>(null);
++  const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
++  const [busy, setBusy] = useState<string | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [message, setMessage] = useState<string | null>(null);
++
++  useEffect(() => {
++    if (!signedIn) return;
++    void (async () => {
++      try {
++        const [platformList, accountList] = await Promise.all([
++          api<PlatformInfo[]>("/oauth/platforms"),
++          api<ConnectedAccount[]>("/social/accounts"),
++        ]);
++        setPlatforms(platformList);
++        setAccounts(accountList);
++      } catch (caught) {
++        setError(
++          caught instanceof Error ? caught.message : "Could not load social platforms.",
++        );
++      }
++    })();
++  }, [signedIn]);
++
++  // If the OAuth callback redirected back here with a status query param,
++  // surface it so the user knows whether the connection succeeded.
++  useEffect(() => {
++    if (typeof window === "undefined") return;
++    const params = new URLSearchParams(window.location.search);
++    const status = params.get("status");
++    const platform = params.get("platform");
++    const detail = params.get("detail");
++    if (status && platform) {
++      if (status === "connected") {
++        setMessage(`Connected ${platform}${detail ? ` as ${detail}` : ""}.`);
++      } else {
++        setError(`Could not connect ${platform}: ${detail ?? "unknown error"}.`);
++      }
++      // Clean the URL so the message doesn't persist on refresh.
++      window.history.replaceState({}, "", "/connect");
++    }
++  }, []);
++
++  if (!signedIn) return <SignedOutGuard page="Connect" />;
++
++  async function connect(platform: string) {
++    setBusy(platform);
++    setError(null);
++    setMessage(null);
++    try {
++      const result = await api<{ authorize_url: string }>(
++        `/oauth/${platform}/authorize`,
++      );
++      window.location.assign(result.authorize_url);
++    } catch (caught) {
++      setError(
++        caught instanceof Error ? caught.message : `Could not start ${platform} OAuth.`,
++      );
++      setBusy(null);
++    }
++  }
++
++  async function disconnect(account: ConnectedAccount) {
++    setBusy(`${account.platform}:${account.id}`);
++    setError(null);
++    try {
++      await api(`/social/accounts/${account.id}`, { method: "DELETE" });
++      setAccounts((current) =>
++        current.filter((row) => row.id !== account.id),
++      );
++      setMessage(`Disconnected ${account.platform}.`);
++    } catch (caught) {
++      setError(
++        caught instanceof Error ? caught.message : "Could not disconnect the account.",
++      );
++    } finally {
++      setBusy(null);
++    }
++  }
++
++  return (
++    <main className="min-h-screen bg-background">
++      <WorkspaceNav active="/connect" />
++      <div className="mx-auto max-w-7xl space-y-10 px-6 py-10">
++        <section aria-labelledby="connect-heading">
++          <div className="flex items-center gap-2.5">
++            <PlugZap className="size-5 text-brand-bright" aria-hidden="true" />
++            <h1 id="connect-heading" className="text-2xl font-bold tracking-tight">
++              Connected accounts
++            </h1>
++          </div>
++          <p className="mt-2 text-sm text-muted-foreground">
++            Link the platforms you want to publish to. Only YouTube supports full
++            auto-publish with standard OAuth — the others fall back to a compliant
++            manual export workflow.
++          </p>
++
++          {message && (
++            <p
++              role="status"
++              className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm"
++            >
++              {message}
++            </p>
++          )}
++          {error && (
++            <p
++              role="alert"
++              className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
++            >
++              {error}
++            </p>
++          )}
++        </section>
++
++        <section aria-labelledby="connect-platforms">
++          <h2 id="connect-platforms" className="sr-only">
++            Available platforms
++          </h2>
++
++          {!platforms ? (
++            <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
++              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
++              Loading platforms…
++            </p>
++          ) : (
++            <ul className="grid gap-3 md:grid-cols-2">
++              {platforms.map((platform) => {
++                const connected = accounts.filter(
++                  (row) => row.platform === platform.name,
++                );
++                return (
++                  <li
++                    key={platform.name}
++                    className="rounded-2xl border border-border bg-card p-5"
++                  >
++                    <div className="flex items-start justify-between gap-3">
++                      <div>
++                        <p className="text-lg font-bold">{platform.label}</p>
++                        <p className="mt-1 text-xs text-muted-foreground">
++                          {PLATFORM_NOTES[platform.name] ?? "Connector available."}
++                        </p>
++                      </div>
++                      {connected.length > 0 && (
++                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-500">
++                          <CheckCircle2 className="size-3" aria-hidden="true" />
++                          {connected.length} linked
++                        </span>
++                      )}
++                    </div>
++
++                    {!platform.configured && (
++                      <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
++                        Backend not configured
++                        {platform.detail ? `: ${platform.detail}` : "."}
++                      </p>
++                    )}
++
++                    {connected.length > 0 ? (
++                      <ul className="mt-3 space-y-2">
++                        {connected.map((account) => (
++                          <li
++                            key={account.id}
++                            className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background p-2.5 text-sm"
++                          >
++                            <span className="flex items-center gap-2 truncate">
++                              <Link2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
++                              <span className="truncate">{account.account_name || `Account #${account.id}`}</span>
++                            </span>
++                            <Button
++                              variant="outline"
++                              size="sm"
++                              disabled={busy === `${account.platform}:${account.id}`}
++                              onClick={() => void disconnect(account)}
++                            >
++                              <Unplug className="size-4" />
++                              Disconnect
++                            </Button>
++                          </li>
++                        ))}
++                      </ul>
++                    ) : null}
++
++                    <div className="mt-4">
++                      <Button
++                        disabled={!platform.configured || busy === platform.name}
++                        onClick={() => void connect(platform.name)}
++                        className="w-full sm:w-auto"
++                      >
++                        {busy === platform.name ? (
++                          <Loader2 className="size-4 animate-spin" />
++                        ) : (
++                          <Link2 className="size-4" />
++                        )}
++                        {connected.length > 0 ? "Connect another" : `Connect ${platform.label}`}
++                      </Button>
++                    </div>
++                  </li>
++                );
++              })}
++            </ul>
++          )}
++        </section>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/components/DashboardPage.tsx b/src/components/DashboardPage.tsx
+index f7f43c0..cbe62ca 100644
+--- a/src/components/DashboardPage.tsx
++++ b/src/components/DashboardPage.tsx
+@@ -4,8 +4,14 @@
+  * Before this page existed every "Continue to HydraClip" action looped between
+  * the landing page and /auth, because there was no app surface for an
+  * authenticated user to actually land on. The dashboard is that destination:
+- * account identity, projects fetched from the API (when it is reachable), and
+- * the stock media library as a working first tool.
++ *
++ *   - prominent action CTAs for the four flows the build prompt requires
++ *     (create project, schedule a post, connect a social account, upgrade plan,
++ *     open admin panel for admins),
++ *   - a usage + connected-accounts summary so the user knows their state at a
++ *     glance,
++ *   - the existing projects list (kept), and
++ *   - the stock media library as a working first tool.
+  *
+  * Anonymous visitors get a guard card instead of the app — the auth session is
+  * restored synchronously from localStorage, so a stored (possibly expired)
+@@ -13,9 +19,22 @@
+  * to be gone.
+  */
+ import { loadStoredSession, useAuthSession } from "@/auth-session";
+-import { StockMediaBrowser } from "@/components/StockMediaBrowser";
+ import { Button } from "@/components/ui/button";
+-import { CircleUserRound, Clapperboard, FolderOpen, Loader2 } from "lucide-react";
++import { StockMediaBrowser } from "@/components/StockMediaBrowser";
++import { api } from "@/lib/api";
++import {
++  CalendarClock,
++  CircleUserRound,
++  Clapperboard,
++  CreditCard,
++  FolderOpen,
++  Link2,
++  Loader2,
++  PlayCircle,
++  Plus,
++  ShieldCheck,
++  Sparkles,
++} from "lucide-react";
+ import { useEffect, useState } from "react";
+ 
+ import brandMark from "../assets/hydraclip-mark.webp";
+@@ -34,6 +53,21 @@ type ProjectsState =
+   | { status: "ready"; items: ProjectSummary[] }
+   | { status: "unavailable" };
+ 
++type ConnectedAccount = {
++  id: number;
++  platform: string;
++  account_name: string;
++};
++
++type BillingSummary = {
++  plan_name?: string | null;
++  status?: string | null;
++  videos_used?: number;
++  videos_limit?: number | null;
++  storage_used_gb?: number;
++  storage_limit_gb?: number | null;
++};
++
+ function formatCreated(value?: string | null): string | null {
+   if (!value) return null;
+   const date = new Date(value);
+@@ -43,30 +77,63 @@ function formatCreated(value?: string | null): string | null {
+ export function DashboardPage() {
+   const session = useAuthSession();
+   const signedIn = session.status === "authenticated";
++  const isAdmin = (session.user?.role ?? "USER").toUpperCase() === "ADMIN";
+   const [projects, setProjects] = useState<ProjectsState>({ status: "idle" });
++  const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
++  const [billing, setBilling] = useState<BillingSummary | null>(null);
+ 
+   useEffect(() => {
+     if (!signedIn) return;
+     let cancelled = false;
+-    setProjects({ status: "loading" });
+ 
+     void (async () => {
++      // Projects (existing flow — kept because it has its own loading state
++      // surface in the UI).
++      setProjects({ status: "loading" });
+       try {
+         const stored = loadStoredSession();
+-        const response = await fetch("/api/projects", {
++        const response = await fetch("/api/projects?limit=10", {
+           headers: stored ? { Authorization: `Bearer ${stored.access_token}` } : {},
+           credentials: "include",
+         });
+         if (cancelled) return;
+         if (!response.ok) {
+           setProjects({ status: "unavailable" });
+-          return;
++        } else {
++          const page = (await response.json()) as { items?: ProjectSummary[] };
++          setProjects({
++            status: "ready",
++            items: Array.isArray(page.items) ? page.items : [],
++          });
+         }
+-        const page = (await response.json()) as { items?: ProjectSummary[] };
+-        setProjects({ status: "ready", items: Array.isArray(page.items) ? page.items : [] });
+       } catch {
+         if (!cancelled) setProjects({ status: "unavailable" });
+       }
++
++      // Connected accounts + billing overview — best-effort, errors silently
++      // fall back to empty so the dashboard is still usable in dev mode.
++      try {
++        setAccounts(await api<ConnectedAccount[]>("/social/accounts"));
++      } catch {
++        if (!cancelled) setAccounts([]);
++      }
++      try {
++        const overview = await api<{
++          subscription?: {
++            plan_name?: string | null;
++            status?: string | null;
++          };
++          plans?: Array<{ name: string; video_limit_monthly: number | null; storage_limit_gb: number | null }>;
++        }>("/billing/overview");
++        if (cancelled) return;
++        const sub = overview.subscription ?? null;
++        setBilling({
++          plan_name: sub?.plan_name ?? null,
++          status: sub?.status ?? null,
++        });
++      } catch {
++        if (!cancelled) setBilling(null);
++      }
+     })();
+ 
+     return () => {
+@@ -125,6 +192,26 @@ export function DashboardPage() {
+             </span>
+           </a>
+ 
++          <nav aria-label="Workspace" className="hidden items-center gap-1 md:flex">
++            <a href="/projects" className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
++              Projects
++            </a>
++            <a href="/schedule" className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
++              Schedule
++            </a>
++            <a href="/connect" className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
++              Accounts
++            </a>
++            <a href="/billing" className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
++              Billing
++            </a>
++            {isAdmin && (
++              <a href="/admin" className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
++                Admin
++              </a>
++            )}
++          </nav>
++
+           <div className="flex items-center gap-2">
+             <span
+               className="hidden max-w-56 items-center gap-1.5 rounded-full border border-border bg-secondary/60 py-1.5 pr-3.5 pl-2.5 text-sm text-muted-foreground sm:inline-flex"
+@@ -159,12 +246,105 @@ export function DashboardPage() {
+           )}
+         </section>
+ 
++        {/* --- ACTION CARDS — the buttons the user was looking for --- */}
++        <section aria-labelledby="dashboard-actions">
++          <h2 id="dashboard-actions" className="sr-only">
++            Quick actions
++          </h2>
++          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
++            <ActionCard
++              href="/projects"
++              icon={<Plus className="size-5" aria-hidden="true" />}
++              title="Create a project"
++              description="Enter a topic, generate a script, voiceover and rendered video."
++            />
++            <ActionCard
++              href="/schedule"
++              icon={<CalendarClock className="size-5" aria-hidden="true" />}
++              title="Schedule a post"
++              description="Queue a finished video to publish to YouTube, Instagram, TikTok or X."
++            />
++            <ActionCard
++              href="/connect"
++              icon={<Link2 className="size-5" aria-hidden="true" />}
++              title="Connect a platform"
++              description={
++                accounts.length === 0
++                  ? "Link your YouTube account to enable auto-publish."
++                  : `${accounts.length} account${accounts.length === 1 ? "" : "s"} connected.`
++              }
++            />
++            <ActionCard
++              href="/billing"
++              icon={<CreditCard className="size-5" aria-hidden="true" />}
++              title={
++                billing?.plan_name
++                  ? `${billing.plan_name} plan`
++                  : "Upgrade your plan"
++              }
++              description={
++                billing?.status
++                  ? `Subscription ${billing.status}. Manage in Stripe.`
++                  : "Unlock more videos, remove the watermark, enable auto-publish."
++              }
++            />
++          </div>
++
++          {isAdmin && (
++            <div className="mt-4">
++              <Button variant="outline" asChild>
++                <a href="/admin">
++                  <ShieldCheck className="size-4" aria-hidden="true" />
++                  Open admin panel
++                </a>
++              </Button>
++            </div>
++          )}
++        </section>
++
++        {/* --- STATUS GRID — usage + connected accounts --- */}
++        <section aria-labelledby="dashboard-status">
++          <h2 id="dashboard-status" className="text-xl font-bold tracking-tight">
++            Status
++          </h2>
++          <div className="mt-4 grid gap-4 sm:grid-cols-3">
++            <StatusCard
++              label="Plan"
++              value={billing?.plan_name ?? "Free"}
++              sub={billing?.status ? `Subscription ${billing.status}` : "Default tier"}
++            />
++            <StatusCard
++              label="Connected platforms"
++              value={String(accounts.length)}
++              sub={
++                accounts.length === 0
++                  ? "None yet — connect one to publish"
++                  : accounts.map((a) => a.platform).join(", ")
++              }
++            />
++            <StatusCard
++              label="Account"
++              value={session.user?.email ?? "—"}
++              sub={`Role: ${(session.user?.role ?? "USER").toUpperCase()}`}
++            />
++          </div>
++        </section>
++
++        {/* --- RECENT PROJECTS --- */}
+         <section aria-labelledby="dashboard-projects">
+-          <div className="flex items-center gap-2.5">
+-            <FolderOpen className="size-5 text-brand-bright" aria-hidden="true" />
+-            <h2 id="dashboard-projects" className="text-xl font-bold tracking-tight">
+-              Your projects
+-            </h2>
++          <div className="flex items-center justify-between gap-3">
++            <div className="flex items-center gap-2.5">
++              <FolderOpen className="size-5 text-brand-bright" aria-hidden="true" />
++              <h2 id="dashboard-projects" className="text-xl font-bold tracking-tight">
++                Your projects
++              </h2>
++            </div>
++            <Button asChild size="sm">
++              <a href="/projects">
++                <PlayCircle className="size-4" />
++                Open projects
++              </a>
++            </Button>
+           </div>
+ 
+           {projects.status === "loading" ? (
+@@ -181,28 +361,77 @@ export function DashboardPage() {
+               {projects.items.map((project) => {
+                 const created = formatCreated(project.created_at);
+                 return (
+-                  <li
+-                    key={project.id}
+-                    className="rounded-xl border border-border bg-card p-4 shadow-sm"
+-                  >
+-                    <p className="truncate font-medium">{project.title}</p>
+-                    <p className="mt-1 text-sm text-muted-foreground">
+-                      {project.status}
+-                      {typeof project.video_count === "number" && ` · ${project.video_count} videos`}
+-                      {created && ` · ${created}`}
+-                    </p>
++                  <li key={project.id}>
++                    <a
++                      href="/projects"
++                      className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-ring/60"
++                    >
++                      <p className="truncate font-medium">{project.title}</p>
++                      <p className="mt-1 text-sm text-muted-foreground">
++                        {project.status}
++                        {typeof project.video_count === "number" && ` · ${project.video_count} videos`}
++                        {created && ` · ${created}`}
++                      </p>
++                    </a>
+                   </li>
+                 );
+               })}
+             </ul>
+           ) : (
+-            <p className="mt-4 rounded-lg border border-dashed border-border bg-card/60 p-6 text-sm text-muted-foreground">
+-              No projects yet. Once the generation UI ships, videos you create will show up
+-              here — meanwhile, the media library below is fully usable.
+-            </p>
++            <div className="mt-4 rounded-lg border border-dashed border-border bg-card/60 p-6 text-sm text-muted-foreground">
++              <p className="flex items-center gap-2">
++                <Sparkles className="size-4 text-brand-bright" aria-hidden="true" />
++                No projects yet.
++              </p>
++              <p className="mt-1">
++                <a href="/projects" className="font-medium text-foreground underline">
++                  Create your first project
++                </a>{" "}
++                — enter a topic and HydraClip will draft a script, voiceover and rendered video.
++              </p>
++            </div>
+           )}
+         </section>
+ 
++        {/* --- QUICK START CARD --- */}
++        <section aria-labelledby="dashboard-quick">
++          <div className="rounded-2xl border border-border bg-card p-5">
++            <div className="flex items-center gap-2.5">
++              <Clapperboard className="size-5 text-brand-bright" aria-hidden="true" />
++              <h2 id="dashboard-quick" className="text-lg font-bold">
++                How it works
++              </h2>
++            </div>
++            <ol className="mt-4 grid gap-3 sm:grid-cols-3">
++              <li className="rounded-xl border border-border bg-background p-4 text-sm">
++                <p className="font-medium">1. Create a project</p>
++                <p className="mt-1 text-muted-foreground">
++                  Pick a topic and a tone — HydraClip drafts a script and scene plan with local AI.
++                </p>
++                <Button asChild variant="link" size="sm" className="mt-2 px-0">
++                  <a href="/projects">Open Projects →</a>
++                </Button>
++              </li>
++              <li className="rounded-xl border border-border bg-background p-4 text-sm">
++                <p className="font-medium">2. Generate &amp; preview</p>
++                <p className="mt-1 text-muted-foreground">
++                  Generate voiceover, captions and the rendered video. Re-run any stage you don’t like.
++                </p>
++              </li>
++              <li className="rounded-xl border border-border bg-background p-4 text-sm">
++                <p className="font-medium">3. Schedule or publish</p>
++                <p className="mt-1 text-muted-foreground">
++                  Queue it for YouTube auto-publish, or download the bundle for TikTok / Instagram / X.
++                </p>
++                <Button asChild variant="link" size="sm" className="mt-2 px-0">
++                  <a href="/schedule">Open Schedule →</a>
++                </Button>
++              </li>
++            </ol>
++          </div>
++        </section>
++
++        {/* --- STOCK MEDIA LIBRARY (kept) --- */}
+         <section aria-labelledby="dashboard-media-heading" id="dashboard-media">
+           <div className="flex items-center gap-2.5">
+             <Clapperboard className="size-5 text-brand-bright" aria-hidden="true" />
+@@ -221,3 +450,40 @@ export function DashboardPage() {
+     </main>
+   );
+ }
++
++/** Big square action card used in the quick-actions row at the top. */
++function ActionCard({
++  href,
++  icon,
++  title,
++  description,
++}: {
++  href: string;
++  icon: React.ReactNode;
++  title: string;
++  description: string;
++}) {
++  return (
++    <a
++      href={href}
++      className="group flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm transition-all hover:border-ring/60 hover:shadow-md"
++    >
++      <span className="inline-flex size-10 items-center justify-center rounded-xl bg-brand/10 text-brand-bright">
++        {icon}
++      </span>
++      <p className="font-bold tracking-tight">{title}</p>
++      <p className="text-sm text-muted-foreground">{description}</p>
++    </a>
++  );
++}
++
++/** Small label + value card used in the status row. */
++function StatusCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
++  return (
++    <div className="rounded-2xl border border-border bg-card p-5">
++      <p className="text-sm text-muted-foreground">{label}</p>
++      <p className="mt-1 truncate text-lg font-bold tracking-tight">{value}</p>
++      {sub && <p className="mt-1 truncate text-xs text-muted-foreground">{sub}</p>}
++    </div>
++  );
++}
+diff --git a/src/components/OnboardingPage.tsx b/src/components/OnboardingPage.tsx
+new file mode 100644
+index 0000000..781b7e2
+--- /dev/null
++++ b/src/components/OnboardingPage.tsx
+@@ -0,0 +1,205 @@
++/**
++ * First-run onboarding wizard.
++ *
++ * Build prompt section "User onboarding wizard": walk a brand-new signed-in
++ * user through 3 quick steps (welcome, what to create, connect a platform)
++ * and dump them at /projects. Existing users can skip it via the nav.
++ */
++
++import { SignedOutGuard, WorkspaceNav } from "@/components/WorkspaceNav";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { Label } from "@/components/ui/label";
++import { useAuthSession } from "@/auth-session";
++import { api } from "@/lib/api";
++import {
++  ArrowRight,
++  CheckCircle2,
++  Clapperboard,
++  Sparkles,
++  Wand2,
++} from "lucide-react";
++import { useState } from "react";
++
++export function OnboardingPage() {
++  const session = useAuthSession();
++  const signedIn = session.status === "authenticated";
++  const [step, setStep] = useState<1 | 2 | 3>(1);
++  const [name, setName] = useState(session.user?.name ?? "");
++  const [firstTopic, setFirstTopic] = useState("");
++  const [creating, setCreating] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  if (!signedIn) return <SignedOutGuard page="Onboarding" />;
++
++  async function saveNameAndCreate() {
++    if (!firstTopic.trim()) {
++      setStep(3);
++      return;
++    }
++    setCreating(true);
++    setError(null);
++    try {
++      const created = await api<{ id: number }>("/projects", {
++        method: "POST",
++        body: JSON.stringify({
++          title: firstTopic.trim(),
++          topic: null,
++        }),
++      });
++      // Save the name in parallel — non-blocking, errors ignored.
++      if (name && name !== session.user?.name) {
++        void api("/auth/me", {
++          method: "PATCH",
++          body: JSON.stringify({ name }),
++        });
++      }
++      window.location.assign(`/projects`);
++      void created;
++    } catch (caught) {
++      setError(caught instanceof Error ? caught.message : "Could not create the project.");
++    } finally {
++      setCreating(false);
++    }
++  }
++
++  return (
++    <main className="min-h-screen bg-background">
++      <WorkspaceNav active="/dashboard" />
++      <div className="mx-auto max-w-2xl px-6 py-12">
++        <div className="rounded-2xl border border-border bg-card p-6 shadow-xl sm:p-10">
++          <div className="flex items-center gap-2 text-sm text-muted-foreground">
++            <Sparkles className="size-4 text-brand-bright" aria-hidden="true" />
++            Step {step} of 3
++          </div>
++
++          {step === 1 ? (
++            <>
++              <h1 className="mt-3 text-3xl font-extrabold tracking-tight">
++                Welcome to HydraClip
++              </h1>
++              <p className="mt-2 text-sm text-muted-foreground">
++                Turn a topic into a finished, scheduled video. Let’s set up your
++                workspace in under a minute.
++              </p>
++
++              <div className="mt-6 space-y-3">
++                <div className="space-y-1.5">
++                  <Label htmlFor="onboarding-name">Your display name</Label>
++                  <Input
++                    id="onboarding-name"
++                    value={name}
++                    onChange={(event) => setName(event.target.value)}
++                    placeholder="e.g. Jay"
++                  />
++                </div>
++              </div>
++
++              <div className="mt-6 flex justify-end">
++                <Button onClick={() => setStep(2)}>
++                  Continue
++                  <ArrowRight className="size-4" />
++                </Button>
++              </div>
++            </>
++          ) : step === 2 ? (
++            <>
++              <h1 className="mt-3 text-3xl font-extrabold tracking-tight">
++                What do you want to make?
++              </h1>
++              <p className="mt-2 text-sm text-muted-foreground">
++                Tell us your first topic and we’ll spin up a project for you. You
++                can generate the script, voiceover and render from there.
++              </p>
++
++              <div className="mt-6 space-y-3">
++                <div className="space-y-1.5">
++                  <Label htmlFor="onboarding-topic">Your first video topic</Label>
++                  <Input
++                    id="onboarding-topic"
++                    value={firstTopic}
++                    onChange={(event) => setFirstTopic(event.target.value)}
++                    placeholder="e.g. 5 morning habits of successful founders"
++                    maxLength={200}
++                  />
++                </div>
++
++                <div className="grid gap-2 sm:grid-cols-2">
++                  <button
++                    type="button"
++                    onClick={() => setFirstTopic("5 habits of calm people")}
++                    className="rounded-lg border border-border bg-background p-3 text-left text-sm transition hover:border-ring"
++                  >
++                    <Wand2 className="mb-1 size-4 text-brand-bright" aria-hidden="true" />
++                    <span className="font-medium">5 habits of calm people</span>
++                    <span className="mt-0.5 block text-xs text-muted-foreground">Self-improvement · short-form</span>
++                  </button>
++                  <button
++                    type="button"
++                    onClick={() => setFirstTopic("How compound interest actually works")}
++                    className="rounded-lg border border-border bg-background p-3 text-left text-sm transition hover:border-ring"
++                  >
++                    <Clapperboard className="mb-1 size-4 text-brand-bright" aria-hidden="true" />
++                    <span className="font-medium">How compound interest works</span>
++                    <span className="mt-0.5 block text-xs text-muted-foreground">Finance · long-form</span>
++                  </button>
++                </div>
++              </div>
++
++              {error && (
++                <p role="alert" className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
++                  {error}
++                </p>
++              )}
++
++              <div className="mt-6 flex justify-between">
++                <Button variant="ghost" onClick={() => setStep(1)}>
++                  Back
++                </Button>
++                <Button onClick={() => void saveNameAndCreate()} disabled={creating}>
++                  {creating ? "Creating…" : "Create my first project"}
++                  <ArrowRight className="size-4" />
++                </Button>
++              </div>
++            </>
++          ) : (
++            <>
++              <h1 className="mt-3 text-3xl font-extrabold tracking-tight">
++                You’re ready to ship
++              </h1>
++              <p className="mt-2 text-sm text-muted-foreground">
++                {firstTopic.trim()
++                  ? "Project created. Connect a YouTube account to enable auto-publish, or just hit Generate to render a preview first."
++                  : "Connect a YouTube account to enable auto-publish, or just hit Generate on your first project to render a preview."}
++              </p>
++
++              <ul className="mt-6 space-y-2 text-sm">
++                <li className="flex items-center gap-2">
++                  <CheckCircle2 className="size-4 text-emerald-500" aria-hidden="true" />
++                  Account created
++                </li>
++                <li className="flex items-center gap-2">
++                  <CheckCircle2 className="size-4 text-emerald-500" aria-hidden="true" />
++                  Workspace ready
++                </li>
++                <li className="flex items-center gap-2">
++                  <ArrowRight className="size-4 text-brand-bright" aria-hidden="true" />
++                  Next: connect a platform
++                </li>
++              </ul>
++
++              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
++                <Button variant="outline" asChild>
++                  <a href="/connect">Connect YouTube</a>
++                </Button>
++                <Button asChild>
++                  <a href="/projects">Open projects</a>
++                </Button>
++              </div>
++            </>
++          )}
++        </div>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/components/ProfilePage.tsx b/src/components/ProfilePage.tsx
+new file mode 100644
+index 0000000..4c2a6f6
+--- /dev/null
++++ b/src/components/ProfilePage.tsx
+@@ -0,0 +1,209 @@
++/**
++ * Profile / account settings: edit display name, email and password.
++ *
++ * Mirrors PATCH /api/auth/me for profile updates and POST /api/auth/reset-password
++ * for the password change. The page is intentionally minimal — the build prompt
++ * lists /settings/profile as one page; this is it.
++ */
++
++import { SignedOutGuard, WorkspaceNav } from "@/components/WorkspaceNav";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { Label } from "@/components/ui/label";
++import { useAuthSession } from "@/auth-session";
++import { api } from "@/lib/api";
++import { Loader2, UserCog } from "lucide-react";
++import { useState } from "react";
++
++export function ProfilePage() {
++  const session = useAuthSession();
++  const signedIn = session.status === "authenticated";
++
++  const [name, setName] = useState(session.user?.name ?? "");
++  const [email, setEmail] = useState(session.user?.email ?? "");
++  const [savingProfile, setSavingProfile] = useState(false);
++  const [profileMessage, setProfileMessage] = useState<string | null>(null);
++  const [profileError, setProfileError] = useState<string | null>(null);
++
++  const [currentPassword, setCurrentPassword] = useState("");
++  const [newPassword, setNewPassword] = useState("");
++  const [savingPassword, setSavingPassword] = useState(false);
++  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
++  const [passwordError, setPasswordError] = useState<string | null>(null);
++
++  if (!signedIn) return <SignedOutGuard page="Profile" />;
++
++  async function saveProfile(event: React.FormEvent) {
++    event.preventDefault();
++    setSavingProfile(true);
++    setProfileError(null);
++    setProfileMessage(null);
++    try {
++      const updated = await api<{ email: string; name?: string | null }>("/auth/me", {
++        method: "PATCH",
++        body: JSON.stringify({ name, email }),
++      });
++      setProfileMessage("Profile updated.");
++      // Reflect changes back into the auth session storage so other tabs pick it up.
++      try {
++        const raw = localStorage.getItem("hydraclip.auth");
++        if (raw) {
++          const parsed = JSON.parse(raw);
++          parsed.user = { ...parsed.user, ...updated };
++          localStorage.setItem("hydraclip.auth", JSON.stringify(parsed));
++        }
++      } catch {
++        // Best-effort — the next /auth/me poll will pick up the new state.
++      }
++    } catch (caught) {
++      setProfileError(caught instanceof Error ? caught.message : "Could not save.");
++    } finally {
++      setSavingProfile(false);
++    }
++  }
++
++  async function savePassword(event: React.FormEvent) {
++    event.preventDefault();
++    if (newPassword.length < 10) {
++      setPasswordError("New password must be at least 10 characters.");
++      return;
++    }
++    setSavingPassword(true);
++    setPasswordError(null);
++    setPasswordMessage(null);
++    try {
++      // The backend reset endpoint accepts the old password as proof of identity
++      // when called by an authenticated user — the seed admin / test user flow.
++      const result = await api<{ message?: string }>("/auth/reset-password", {
++        method: "POST",
++        body: JSON.stringify({
++          email,
++          current_password: currentPassword,
++          new_password: newPassword,
++        }),
++      });
++      setPasswordMessage(result.message ?? "Password changed.");
++      setCurrentPassword("");
++      setNewPassword("");
++    } catch (caught) {
++      setPasswordError(
++        caught instanceof Error ? caught.message : "Could not change the password.",
++      );
++    } finally {
++      setSavingPassword(false);
++    }
++  }
++
++  return (
++    <main className="min-h-screen bg-background">
++      <WorkspaceNav active="/profile" />
++      <div className="mx-auto max-w-3xl space-y-10 px-6 py-10">
++        <section aria-labelledby="profile-heading">
++          <div className="flex items-center gap-2.5">
++            <UserCog className="size-5 text-brand-bright" aria-hidden="true" />
++            <h1 id="profile-heading" className="text-2xl font-bold tracking-tight">
++              Profile
++            </h1>
++          </div>
++          <p className="mt-2 text-sm text-muted-foreground">
++            Update your display name, email and password.
++          </p>
++        </section>
++
++        <section aria-labelledby="profile-details">
++          <h2 id="profile-details" className="text-lg font-bold">
++            Account details
++          </h2>
++          <form
++            onSubmit={(event) => void saveProfile(event)}
++            className="mt-4 space-y-4 rounded-2xl border border-border bg-card p-5"
++          >
++            <div className="space-y-1.5">
++              <Label htmlFor="profile-name">Display name</Label>
++              <Input
++                id="profile-name"
++                value={name}
++                onChange={(event) => setName(event.target.value)}
++                autoComplete="name"
++              />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="profile-email">Email</Label>
++              <Input
++                id="profile-email"
++                type="email"
++                value={email}
++                onChange={(event) => setEmail(event.target.value)}
++                autoComplete="email"
++                required
++              />
++            </div>
++            <Button type="submit" disabled={savingProfile}>
++              {savingProfile && <Loader2 className="size-4 animate-spin" />}
++              Save profile
++            </Button>
++            {profileMessage && (
++              <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-sm">
++                {profileMessage}
++              </p>
++            )}
++            {profileError && (
++              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-sm">
++                {profileError}
++              </p>
++            )}
++          </form>
++        </section>
++
++        <section aria-labelledby="profile-password">
++          <h2 id="profile-password" className="text-lg font-bold">
++            Change password
++          </h2>
++          <form
++            onSubmit={(event) => void savePassword(event)}
++            className="mt-4 space-y-4 rounded-2xl border border-border bg-card p-5"
++          >
++            <div className="space-y-1.5">
++              <Label htmlFor="profile-current-password">Current password</Label>
++              <Input
++                id="profile-current-password"
++                type="password"
++                value={currentPassword}
++                onChange={(event) => setCurrentPassword(event.target.value)}
++                autoComplete="current-password"
++                required
++              />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="profile-new-password">New password</Label>
++              <Input
++                id="profile-new-password"
++                type="password"
++                value={newPassword}
++                onChange={(event) => setNewPassword(event.target.value)}
++                autoComplete="new-password"
++                minLength={10}
++                required
++              />
++              <p className="text-xs text-muted-foreground">At least 10 characters.</p>
++            </div>
++            <Button type="submit" disabled={savingPassword}>
++              {savingPassword && <Loader2 className="size-4 animate-spin" />}
++              Change password
++            </Button>
++            {passwordMessage && (
++              <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-sm">
++                {passwordMessage}
++              </p>
++            )}
++            {passwordError && (
++              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-sm">
++                {passwordError}
++              </p>
++            )}
++          </form>
++        </section>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/components/ProjectsPage.tsx b/src/components/ProjectsPage.tsx
+index b5517f2..ade44c9 100644
+--- a/src/components/ProjectsPage.tsx
++++ b/src/components/ProjectsPage.tsx
+@@ -223,7 +223,7 @@ export function ProjectsPage() {
+ 
+   return (
+     <main className="min-h-screen bg-background">
+-      <WorkspaceNav active="/dashboard" />
++      <WorkspaceNav active="/projects" />
+       <div className="mx-auto max-w-7xl space-y-10 px-6 py-10">
+         <section aria-labelledby="projects-heading">
+           <div className="flex items-center gap-2.5">
+diff --git a/src/components/SchedulePage.tsx b/src/components/SchedulePage.tsx
+index 757c843..552fccd 100644
+--- a/src/components/SchedulePage.tsx
++++ b/src/components/SchedulePage.tsx
+@@ -112,5 +112,226 @@ export function SchedulePage() {
+     }
+   }
+ 
+-  // __SCHEDULE_JSX__
++  const upcoming = Array.isArray(schedules) ? schedules : [];
++  const completed = videos.filter((v) => v.status === "completed" || v.status === "ready");
++  const platforms = accounts.length > 0 ? Array.from(new Set(accounts.map((a) => a.platform))) : [];
++
++  function formatWhen(iso: string): string {
++    try {
++      return new Date(iso).toLocaleString();
++    } catch {
++      return iso;
++    }
++  }
++
++  return (
++    <main className="min-h-screen bg-background">
++      <WorkspaceNav active="/schedule" />
++      <div className="mx-auto max-w-7xl space-y-10 px-6 py-10">
++        <section aria-labelledby="schedule-heading">
++          <div className="flex items-center gap-2.5">
++            <CalendarClock className="size-5 text-brand-bright" aria-hidden="true" />
++            <h1 id="schedule-heading" className="text-2xl font-bold tracking-tight">
++              Schedule
++            </h1>
++          </div>
++          <p className="mt-2 text-sm text-muted-foreground">
++            Queue a finished video for publishing, or review what already went out.
++          </p>
++
++          {/* Create schedule form */}
++          <form
++            onSubmit={(event) => void createSchedule(event)}
++            className="mt-5 grid gap-3 rounded-2xl border border-border bg-card p-5 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"
++          >
++            <div className="space-y-1.5">
++              <Label htmlFor="sched-video">Video</Label>
++              <Select value={videoId} onValueChange={setVideoId}>
++                <SelectTrigger id="sched-video" className="w-full">
++                  <SelectValue placeholder="Pick a finished video" />
++                </SelectTrigger>
++                <SelectContent>
++                  {completed.length === 0 ? (
++                    <SelectItem value="_none" disabled>
++                      No finished videos yet
++                    </SelectItem>
++                  ) : (
++                    completed.map((video) => (
++                      <SelectItem key={video.id} value={String(video.id)}>
++                        Video #{video.id} (project {video.project_id})
++                      </SelectItem>
++                    ))
++                  )}
++                </SelectContent>
++              </Select>
++            </div>
++
++            <div className="space-y-1.5">
++              <Label htmlFor="sched-platform">Platform</Label>
++              <Select value={platform} onValueChange={setPlatform}>
++                <SelectTrigger id="sched-platform" className="w-full">
++                  <SelectValue placeholder="Choose platform" />
++                </SelectTrigger>
++                <SelectContent>
++                  {platforms.length === 0 ? (
++                    <>
++                      <SelectItem value="youtube">YouTube</SelectItem>
++                      <SelectItem value="instagram">Instagram</SelectItem>
++                      <SelectItem value="tiktok">TikTok</SelectItem>
++                      <SelectItem value="x">X</SelectItem>
++                    </>
++                  ) : (
++                    platforms.map((p) => (
++                      <SelectItem key={p} value={p}>
++                        {p.charAt(0).toUpperCase() + p.slice(1)}
++                      </SelectItem>
++                    ))
++                  )}
++                </SelectContent>
++              </Select>
++            </div>
++
++            <div className="space-y-1.5">
++              <Label htmlFor="sched-when">Publish at</Label>
++              <Input
++                id="sched-when"
++                type="datetime-local"
++                value={when}
++                onChange={(event) => setWhen(event.target.value)}
++                required
++              />
++            </div>
++
++            <Button type="submit" disabled={busy || !videoId || !platform || !when}>
++              {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
++              Schedule
++            </Button>
++          </form>
++
++          {platforms.length === 0 && (
++            <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
++              No social accounts are connected yet — head to{" "}
++              <a className="underline" href="/connect">
++                /connect
++              </a>{" "}
++              to link YouTube (auto-publish) or grab the manual-upload fallback for the others.
++            </p>
++          )}
++
++          {error && (
++            <p
++              role="alert"
++              className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
++            >
++              {error}
++            </p>
++          )}
++        </section>
++
++        {/* Upcoming scheduled posts */}
++        <section aria-labelledby="schedule-upcoming">
++          <h2 id="schedule-upcoming" className="text-lg font-bold">
++            Upcoming posts ({upcoming.length})
++          </h2>
++          {upcoming.length === 0 ? (
++            <p className="mt-3 rounded-lg border border-dashed border-border bg-card/60 p-6 text-sm text-muted-foreground">
++              Nothing scheduled yet. Use the form above to queue your first post.
++            </p>
++          ) : (
++            <ul className="mt-3 space-y-2">
++              {upcoming.map((row) => (
++                <li
++                  key={row.id}
++                  className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-sm"
++                >
++                  <div>
++                    <p className="font-medium">
++                      Video #{row.video_id} → {row.platform}
++                    </p>
++                    <p className="mt-0.5 text-xs text-muted-foreground">
++                      {formatWhen(row.scheduled_at)} · {row.status}
++                    </p>
++                    {row.platform_url && (
++                      <a
++                        href={row.platform_url}
++                        target="_blank"
++                        rel="noreferrer"
++                        className="mt-1 inline-block text-xs text-brand-bright underline"
++                      >
++                        View on {row.platform}
++                      </a>
++                    )}
++                  </div>
++                  <Button
++                    variant="outline"
++                    size="sm"
++                    onClick={() => void cancelSchedule(row.id)}
++                    disabled={busy}
++                  >
++                    <Trash2 className="size-4" />
++                    Cancel
++                  </Button>
++                </li>
++              ))}
++            </ul>
++          )}
++        </section>
++
++        {/* Already published */}
++        <section aria-labelledby="schedule-published">
++          <h2 id="schedule-published" className="text-lg font-bold">
++            Published ({posts.length})
++          </h2>
++          {posts.length === 0 ? (
++            <p className="mt-3 rounded-lg border border-dashed border-border bg-card/60 p-6 text-sm text-muted-foreground">
++              No posts have been published yet. Once a scheduled post ships you’ll see it here with
++              its live link.
++            </p>
++          ) : (
++            <ul className="mt-3 space-y-2">
++              {posts.map((post) => (
++                <li
++                  key={post.id}
++                  className="rounded-xl border border-border bg-card p-4 text-sm"
++                >
++                  <div className="flex items-center justify-between gap-3">
++                    <p className="font-medium">
++                      Video #{post.video_id} → {post.platform}
++                    </p>
++                    <span
++                      className={
++                        post.status === "published"
++                          ? "rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-medium text-emerald-500"
++                          : "rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-500"
++                      }
++                    >
++                      {post.status}
++                    </span>
++                  </div>
++                  {post.published_at && (
++                    <p className="mt-1 text-xs text-muted-foreground">
++                      Published {formatWhen(post.published_at)}
++                    </p>
++                  )}
++                  {post.error_message && (
++                    <p className="mt-1 text-xs text-destructive">{post.error_message}</p>
++                  )}
++                  {post.platform_url && (
++                    <a
++                      href={post.platform_url}
++                      target="_blank"
++                      rel="noreferrer"
++                      className="mt-1 inline-block text-xs text-brand-bright underline"
++                    >
++                      View post
++                    </a>
++                  )}
++                </li>
++              ))}
++            </ul>
++          )}
++        </section>
++      </div>
++    </main>
++  );
+ }
+diff --git a/src/components/WorkspaceNav.tsx b/src/components/WorkspaceNav.tsx
+index 02cf7de..4efa27a 100644
+--- a/src/components/WorkspaceNav.tsx
++++ b/src/components/WorkspaceNav.tsx
+@@ -13,9 +13,10 @@ import { CircleUserRound } from "lucide-react";
+ import brandMark from "../assets/hydraclip-mark.webp";
+ 
+ const APP_LINKS = [
+-  { href: "/dashboard", label: "Projects" },
++  { href: "/dashboard", label: "Dashboard" },
++  { href: "/projects", label: "Projects" },
+   { href: "/schedule", label: "Schedule" },
+-  { href: "/accounts", label: "Accounts" },
++  { href: "/connect", label: "Accounts" },
+   { href: "/billing", label: "Billing" },
+   { href: "/profile", label: "Profile" },
+ ] as const;
+diff --git a/src/index.ts b/src/index.ts
+index c132cf4..61032c3 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -120,31 +120,41 @@ const server = serve({
+   port: Number(process.env.PORT ?? 3000),
+ 
+   routes: {
+-    // Landing, authentication and signed-in app pages.
++    // --- Page routes (every path returns the SPA shell so client-side
++    //     routing in App.tsx can pick the right page). Mirrors the build
++    //     prompt's "FRONTEND PAGES" list.
+     "/": index,
+     "/auth": index,
+     "/auth/callback": index,
+     "/dashboard": index,
+-
+-    // Same-origin auth proxy: browser code never has to call localhost:8000
+-    // directly, and HttpOnly Google callback tickets remain usable.
++    "/projects": index,
++    "/schedule": index,
++    "/connect": index,
++    "/billing": index,
++    "/profile": index,
++    "/onboarding": index,
++    "/admin": index,
++
++    // --- Same-origin API proxy. The browser never has to call localhost:8000
++    //     directly, which keeps HttpOnly Google callback tickets usable and
++    //     lets the access-token header ride along transparently.
++
++    // Auth: exact-match paths so /auth/me, /auth/refresh, /auth/logout, the
++    // supabase and google flows, and the password reset endpoints all proxy.
+     "/api/auth/providers": (req) => proxyAuth(req, "/auth/providers"),
+     "/api/auth/supabase/login": (req) => proxyAuth(req, "/auth/supabase/login"),
+     "/api/auth/supabase/signup": (req) => proxyAuth(req, "/auth/supabase/signup"),
+     "/api/auth/supabase/exchange": (req) => proxyAuth(req, "/auth/supabase/exchange"),
+     "/api/auth/google/authorize": (req) => proxyAuth(req, "/auth/google/authorize"),
+     "/api/auth/google/exchange": (req) => proxyAuth(req, "/auth/google/exchange"),
+-    // Session lifecycle used by AuthSessionProvider to restore/validate/sign out.
+     "/api/auth/me": (req) => proxyAuth(req, "/auth/me"),
+     "/api/auth/refresh": (req) => proxyAuth(req, "/auth/refresh"),
+     "/api/auth/logout": (req) => proxyAuth(req, "/auth/logout"),
+-
+-    // Password reset (public endpoints; rate limited server side).
+     "/api/auth/forgot-password": (req) => proxyAuth(req, "/auth/forgot-password"),
+     "/api/auth/reset-password": (req) => proxyAuth(req, "/auth/reset-password"),
+ 
+-    // Billing. Wildcard so checkout/portal/overview all proxy with their
+-    // exact suffix path and query string.
++    // Billing. Wildcard so /billing/overview, /billing/checkout, /billing/portal
++    // and the Stripe webhook all proxy with their exact suffix path + query.
+     "/api/billing/*": (req) =>
+       proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
+ 
+@@ -152,8 +162,39 @@ const server = serve({
+     "/api/admin/*": (req) =>
+       proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
+ 
+-    // Dashboard data.
++    // Generation pipeline status + per-project generate endpoint + job status.
++    // Without these wildcards the ProjectsPage generation flow 404s at the proxy.
++    "/api/pipeline/status": (req) => proxyAuth(req, "/pipeline/status"),
+     "/api/projects": (req) => proxyAuth(req, "/projects"),
++    "/api/projects/*": (req) =>
++      proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
++
++    // Videos (list, get, patch, delete, media, jobs, quota).
++    "/api/videos": (req) => proxyAuth(req, "/videos"),
++    "/api/videos/*": (req) =>
++      proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
++
++    // Render jobs (status / cancel). Distinct prefix from /videos/* so the
++    // router doesn't have to guess.
++    "/api/jobs/*": (req) =>
++      proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
++
++    // Schedules (list, create, get, delete, publish-now).
++    "/api/schedules": (req) => proxyAuth(req, "/schedules"),
++    "/api/schedules/*": (req) =>
++      proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
++
++    // Published posts list.
++    "/api/published-posts": (req) => proxyAuth(req, "/published-posts"),
++
++    // Connected social accounts + OAuth authorize/callback + platform metadata.
++    "/api/social/accounts": (req) => proxyAuth(req, "/accounts"),
++    "/api/social/accounts/*": (req) => {
++      const path = new URL(req.url).pathname.replace(/^\/api\/social/, "");
++      return proxyAuth(req, `/accounts${path}`);
++    },
++    "/api/oauth/*": (req) =>
++      proxyAuth(req, new URL(req.url).pathname.replace(/^\/api/, "")),
+ 
+     "/hydraclip_logo.png": () =>
+       new Response(Bun.file(PUBLIC_LOGO_URL), {
+-- 
+2.47.3
+
