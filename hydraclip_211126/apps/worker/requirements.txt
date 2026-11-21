@@ -1,6 +1,6 @@
 # Celery
 celery==5.3.6
-redis==5.0.1
+redis==6.2.0
 
 # Database
 sqlalchemy[asyncio]==2.0.25
@@ -38,3 +38,5 @@ pytest-asyncio==0.23.3
 
 # Type hints
 typing-extensions==4.9.0
+# Flower monitoring
+flower==2.0.1

@@ -3,14 +3,16 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from enum import Enum
 from sqlalchemy import (
+    Enum as SAEnum,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    Boolean,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

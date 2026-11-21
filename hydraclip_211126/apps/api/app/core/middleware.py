@@ -48,3 +48,26 @@ def get_middleware_stack() -> list:
     return [
         SecurityHeadersMiddleware,
     ]
+def add_cors_middleware(app) -> None:
+    """Add CORS middleware using origins from settings."""
+    from fastapi.middleware.cors import CORSMiddleware
+    try:
+        from app.config import get_cors_origins
+        origins = get_cors_origins()
+    except Exception:
+        origins = ["http://localhost:3000", "http://localhost:8000"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+def add_security_headers(app) -> None:
+    """Add security headers middleware."""
+    app.add_middleware(SecurityHeadersMiddleware)
+
+def add_rate_limit_headers(app) -> None:
+    """No-op for now - rate limiting is handled in rate_limiter.py."""
+    return None

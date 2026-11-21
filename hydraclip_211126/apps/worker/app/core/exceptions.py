@@ -67,3 +67,7 @@ class MaintenanceModeException(HydraClipException):
     
     def __init__(self, detail: str = "Service is under maintenance"):
         super().__init__(detail, status_code=503)
+
+
+# Alias - main.py imports this name
+MaintenanceModeError = MaintenanceModeException

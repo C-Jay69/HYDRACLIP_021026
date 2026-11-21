@@ -45,9 +45,6 @@ app = FastAPI(
 add_cors_middleware(app)
 add_security_headers(app)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", ".hydraclip.com"])
-app.add_middleware(
-    lambda: None,  # placeholder
-)
 
 
 # Custom exception handler

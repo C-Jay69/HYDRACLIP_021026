@@ -3,14 +3,16 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from enum import Enum
 from sqlalchemy import (
+    Enum as SAEnum,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,11 +51,11 @@ class Project(Base):
     topic: Mapped[str] = mapped_column(Text, nullable=False)
     niche: Mapped[str] = mapped_column(String(100), default="general", nullable=False)
     platform_targets: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
-    format: Mapped[ProjectFormat] = mapped_column(Enum(ProjectFormat), default=ProjectFormat.SHORT, nullable=False)
-    aspect_ratio: Mapped[ProjectAspectRatio] = mapped_column(Enum(ProjectAspectRatio), default=ProjectAspectRatio.RATIO_9_16, nullable=False)
+    format: Mapped[ProjectFormat] = mapped_column(SAEnum(ProjectFormat), default=ProjectFormat.SHORT, nullable=False)
+    aspect_ratio: Mapped[ProjectAspectRatio] = mapped_column(SAEnum(ProjectAspectRatio), default=ProjectAspectRatio.RATIO_9_16, nullable=False)
     tone: Mapped[str] = mapped_column(String(50), default="educational", nullable=False)
     language: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
-    status: Mapped[ProjectStatus] = mapped_column(Enum(ProjectStatus), default=ProjectStatus.DRAFT, nullable=False)
+    status: Mapped[ProjectStatus] = mapped_column(SAEnum(ProjectStatus), default=ProjectStatus.DRAFT, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

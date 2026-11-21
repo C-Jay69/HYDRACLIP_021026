@@ -96,3 +96,6 @@ async def get_current_user_optional(
         return await get_current_user(token)
     except Exception:
         return None
+def verify_token(token: str) -> dict:
+    """Verify a JWT and return its payload. Alias for decode_token (main.py imports this name)."""
+    return decode_token(token)

@@ -215,7 +215,7 @@ async def get_video_status(
             for j in jobs
         ],
         "error_message": video.error_message,
-    )
+    }
 
 
 @router.get("/{video_id}/download")

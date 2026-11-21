@@ -3,9 +3,10 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from enum import Enum
 from sqlalchemy import (
+    Enum as SAEnum,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -55,7 +56,7 @@ class Video(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
     script_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[VideoStatus] = mapped_column(Enum(VideoStatus), default=VideoStatus.QUEUED, nullable=False)
+    status: Mapped[VideoStatus] = mapped_column(SAEnum(VideoStatus), default=VideoStatus.QUEUED, nullable=False)
     storage_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     resolution: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -87,8 +88,8 @@ class VideoJob(Base):
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     video_id: Mapped[str] = mapped_column(String(36), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
-    job_type: Mapped[VideoJobType] = mapped_column(Enum(VideoJobType), nullable=False)
-    status: Mapped[VideoJobStatus] = mapped_column(Enum(VideoJobStatus), default=VideoJobStatus.QUEUED, nullable=False)
+    job_type: Mapped[VideoJobType] = mapped_column(SAEnum(VideoJobType), nullable=False)
+    status: Mapped[VideoJobStatus] = mapped_column(SAEnum(VideoJobStatus), default=VideoJobStatus.QUEUED, nullable=False)
     progress_pct: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     celery_task_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

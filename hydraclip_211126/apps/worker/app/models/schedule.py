@@ -3,14 +3,16 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from enum import Enum
 from sqlalchemy import (
+    Enum as SAEnum,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,10 +43,10 @@ class Schedule(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     video_id: Mapped[str] = mapped_column(String(36), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    platform: Mapped[Platform] = mapped_column(Enum(Platform), nullable=False)
+    platform: Mapped[Platform] = mapped_column(SAEnum(Platform), nullable=False)
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
-    status: Mapped[ScheduleStatus] = mapped_column(Enum(ScheduleStatus), default=ScheduleStatus.PENDING, nullable=False)
+    status: Mapped[ScheduleStatus] = mapped_column(SAEnum(ScheduleStatus), default=ScheduleStatus.PENDING, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -82,13 +84,13 @@ class PublishedPost(Base):
     video_id: Mapped[str] = mapped_column(String(36), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
     schedule_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("schedules.id", ondelete="SET NULL"), nullable=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    platform: Mapped[Platform] = mapped_column(Enum(Platform), nullable=False)
+    platform: Mapped[Platform] = mapped_column(SAEnum(Platform), nullable=False)
     platform_post_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     platform_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
     tags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
-    status: Mapped[PublishedPostStatus] = mapped_column(Enum(PublishedPostStatus), default=PublishedPostStatus.PENDING, nullable=False)
+    status: Mapped[PublishedPostStatus] = mapped_column(SAEnum(PublishedPostStatus), default=PublishedPostStatus.PENDING, nullable=False)
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

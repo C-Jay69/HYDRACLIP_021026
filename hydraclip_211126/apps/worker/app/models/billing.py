@@ -3,9 +3,10 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from enum import Enum
 from sqlalchemy import (
+    Enum as SAEnum,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -37,7 +38,7 @@ class BillingEvent(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     stripe_event_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    event_type: Mapped[BillingEventType] = mapped_column(Enum(BillingEventType), nullable=False)
+    event_type: Mapped[BillingEventType] = mapped_column(SAEnum(BillingEventType), nullable=False)
     amount_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     currency: Mapped[str] = mapped_column(String(3), default="usd", nullable=False)
     metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -138,27 +138,3 @@ class Plan(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
-
-
-class UsageEvent(Base):
-    """Usage tracking event model."""
-    
-    __tablename__ = "usage_events"
-    
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
-    )
-    
-    # Relationships
-    user: Mapped["User"] = relationship(back_populates="usage_events")
-    
-    __table_args__ = (
-        Index("ix_usage_events_user_id", "user_id"),
-        Index("ix_usage_events_type", "event_type"),
-        Index("ix_usage_events_created_at", "created_at"),
-    )

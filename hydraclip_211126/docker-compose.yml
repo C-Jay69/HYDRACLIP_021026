@@ -149,22 +149,18 @@ services:
 
   # MinIO
   minio:
-    build:
-      context: ./apps/minio
-      dockerfile: Dockerfile
-    command: server /data --console-address ":9001"
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    volumes:
-      - minio_data:/data
+    image: chrislusf/seaweedfs:3.80
+    command: server -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3_config.json -filer -filer.port=9001 -master.port=9333 -volume.port=8080
     ports:
       - "9002:9000"
       - "9003:9001"
+    volumes:
+      - seaweed_data:/data
+      - ./apps/seaweed/s3_config.json:/etc/seaweedfs/s3_config.json:ro
     networks:
       - internal
+      - public
 
-  # Ollama
   ollama:
     image: ollama/ollama:latest
     volumes:
@@ -175,6 +171,7 @@ services:
       - internal
 
 volumes:
+  seaweed_data:
   postgres_data:
   redis_data:
   minio_data:
