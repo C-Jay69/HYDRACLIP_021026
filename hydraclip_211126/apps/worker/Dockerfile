@@ -8,6 +8,14 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     ffmpeg \
     curl \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

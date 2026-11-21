@@ -14,15 +14,15 @@ minio==7.2.4
 ollama==0.1.5
 edge-tts==6.1.1
 piper-tts==1.2.0
-faster-whisper==0.10.0
+faster-whisper==1.1.0
 ffmpeg-python==0.2.0
 
 # Video
 moviepy==1.0.3
-ffmpeg==0.2.0
+ffmpeg-python==0.2.0
 
 # HTTP
-httpx==0.26.0
+httpx==0.25.2
 
 # Config
 pydantic==2.5.3
