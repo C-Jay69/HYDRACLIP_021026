@@ -133,7 +133,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5434:5432"
     networks:
       - internal
 
@@ -149,7 +149,9 @@ services:
 
   # MinIO
   minio:
-    image: minio/minio:latest
+    build:
+      context: ./apps/minio
+      dockerfile: Dockerfile
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=minioadmin
@@ -157,8 +159,8 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9002:9000"
+      - "9003:9001"
     networks:
       - internal
 
@@ -168,7 +170,7 @@ services:
     volumes:
       - ollama_models:/root/.ollama
     ports:
-      - "11434:11434"
+      - "11435:11434"
     networks:
       - internal
 
