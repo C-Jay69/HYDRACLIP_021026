@@ -10,46 +10,46 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
-        env_prefix="HYDRA_",
+        env_prefix="",
         env_file=".env",
         env_file_encoding="utf-8",
     )
     
     # Database
-    database_url: str = Field(..., description="PostgreSQL connection URL")
+    database_url: str = Field("postgresql+asyncpg://hydraclip:hydraclip@postgres:5432/hydraclip", description="PostgreSQL connection URL")
     database_pool_size: int = Field(default=5, ge=1, le=20)
     database_max_overflow: int = Field(default=10, ge=0)
     
     # Redis
-    redis_url: str = Field(..., description="Redis connection URL")
+    redis_url: str = Field("redis://redis:6379/0", description="Redis connection URL")
     
     # MinIO / S3
-    minio_endpoint: str = Field(..., description="MinIO/S3 endpoint URL")
-    minio_access_key: str = Field(..., description="MinIO/S3 access key")
-    minio_secret_key: str = Field(..., description="MinIO/S3 secret key")
-    minio_bucket: str = Field(..., description="Default bucket name")
+    minio_endpoint: str = Field("minio:9000", description="MinIO/S3 endpoint URL")
+    minio_access_key: str = Field("minioadmin", description="MinIO/S3 access key")
+    minio_secret_key: str = Field("minioadmin", description="MinIO/S3 secret key")
+    minio_bucket: str = Field("hydraclip", description="Default bucket name")
     
     # Security
-    secret_key: str = Field(..., description="JWT secret key")
+    secret_key: str = Field("dev-secret-key-change-me-1234567890abcdef", description="JWT secret key")
     algorithm: str = Field(default="HS256", description="JWT algorithm")
     access_token_expire_minutes: int = Field(default=15, ge=1, le=1440)
     refresh_token_expire_days: int = Field(default=7, ge=1, le=365)
     
     # Admin
-    admin_email: str = Field(..., description="Admin email address")
-    admin_password: str = Field(..., description="Admin password hash")
+    admin_email: str = Field("admin@hydraclip.local", description="Admin email address")
+    admin_password: str = Field("dev-admin-password", description="Admin password hash")
     
     # Stripe
-    stripe_publishable_key: str = Field(..., description="Stripe publishable key")
-    stripe_secret_key: str = Field(..., description="Stripe secret key")
-    stripe_webhook_secret: str = Field(..., description="Stripe webhook secret")
-    stripe_creator_price_id: str = Field(..., description="Creator plan price ID")
-    stripe_pro_price_id: str = Field(..., description="Pro plan price ID")
+    stripe_publishable_key: str = Field("pk_test_dummy", description="Stripe publishable key")
+    stripe_secret_key: str = Field("sk_test_dummy", description="Stripe secret key")
+    stripe_webhook_secret: str = Field("whsec_dummy", description="Stripe webhook secret")
+    stripe_creator_price_id: str = Field("price_dummy_creator", description="Creator plan price ID")
+    stripe_pro_price_id: str = Field("price_dummy_pro", description="Pro plan price ID")
     
     # OAuth
-    youtube_client_id: str = Field(..., description="YouTube OAuth client ID")
-    youtube_client_secret: str = Field(..., description="YouTube OAuth client secret")
-    youtube_redirect_uri: str = Field(..., description="YouTube OAuth redirect URI")
+    youtube_client_id: str = Field("dummy-client-id", description="YouTube OAuth client ID")
+    youtube_client_secret: str = Field("dummy-client-secret", description="YouTube OAuth client secret")
+    youtube_redirect_uri: str = Field("http://localhost:8000/api/v1/auth/youtube/callback", description="YouTube OAuth redirect URI")
     
     # AI Models
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama server URL")
@@ -58,8 +58,8 @@ class Settings(BaseSettings):
     whisper_model_size: str = Field(default="tiny", description="Whisper model size")
     
     # App
-    app_url: str = Field(..., description="Application URL")
-    next_public_app_url: str = Field(..., description="Next.js public app URL")
+    app_url: str = Field("http://localhost:3000", description="Application URL")
+    next_public_app_url: str = Field("http://localhost:3000", description="Next.js public app URL")
     maintenance_mode: bool = Field(default=False, description="Global maintenance mode")
     
     # Plan limits
