@@ -24,7 +24,7 @@ async def stripe_webhook(
         return {"success": True, "event_id": event.id}
     except Exception as e:
         # Log the error
-        from app.models.webhook_event import WebhookEvent
+        from app.models.system import WebhookEvent
         event = WebhookEvent(
             id=secrets.token_urlsafe(16),
             provider="stripe",

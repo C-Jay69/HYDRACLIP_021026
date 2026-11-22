@@ -44,7 +44,6 @@ async def list_published(
     db: AsyncSession = Depends(get_db),
 ):
     """List published posts."""
-    from app.models.published_post import PublishedPost
     result = await db.execute(
         select(PublishedPost).where(PublishedPost.user_id == user.id)
         .order_by(PublishedPost.created_at.desc())
@@ -73,7 +72,6 @@ async def get_published_post(
     db: AsyncSession = Depends(get_db),
 ):
     """Get a published post."""
-    from app.models.published_post import PublishedPost
     result = await db.execute(
         select(PublishedPost).where(PublishedPost.id == post_id, PublishedPost.user_id == user.id)
     )

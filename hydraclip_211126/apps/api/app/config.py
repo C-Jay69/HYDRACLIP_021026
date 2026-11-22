@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     
     # MinIO / S3
     minio_endpoint: str = Field("minio:9000", description="MinIO/S3 endpoint URL")
+    minio_public_endpoint: str = Field(
+        "localhost:9002",
+        description="MinIO/S3 endpoint that browsers can reach (used for presigned URLs)",
+    )
     minio_access_key: str = Field("minioadmin", description="MinIO/S3 access key")
     minio_secret_key: str = Field("minioadmin", description="MinIO/S3 secret key")
     minio_bucket: str = Field("hydraclip", description="Default bucket name")

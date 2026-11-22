@@ -68,8 +68,11 @@ async def create_checkout(
 ):
     """Create Stripe checkout session."""
     from app.services.billing_service import create_checkout_session
-    
-    checkout_url = await create_checkout_session(plan_id, user.id)
+
+    try:
+        checkout_url = await create_checkout_session(plan_id, user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     return {"checkout_url": checkout_url}
 
 

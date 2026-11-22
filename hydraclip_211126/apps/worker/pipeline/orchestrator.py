@@ -168,7 +168,6 @@ class VideoGenerationOrchestrator:
         if job:
             job.status = status
             job.progress_pct = progress
-            job.log_text = log_text
             await db.commit()
     
     async def regenerate_step(self, video_id: str, step: str) -> dict:

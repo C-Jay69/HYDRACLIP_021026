@@ -10,8 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.core.database import AsyncSessionLocal, Base, async_engine
 from app.core.security import get_password_hash
-from app.models.user import User, UserRole, PlanTier
-from app.models.billing import Plan
+from app.models.user import User, UserRole, PlanTier, Plan
 from app.models.system import SystemSetting, PromptTemplate
 from app.config import get_settings
 
@@ -195,6 +194,11 @@ async def seed():
         print(f"  Test: test@example.com / testpassword123")
 
 
+async def main():
+    """Run table creation and seeding on a single event loop."""
+    await create_tables()
+    await seed()
+
+
 if __name__ == "__main__":
-    asyncio.run(create_tables())
-    asyncio.run(seed())
+    asyncio.run(main())

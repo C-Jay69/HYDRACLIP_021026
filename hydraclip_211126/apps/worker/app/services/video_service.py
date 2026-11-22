@@ -82,12 +82,14 @@ async def update_job(
     from app.models.video import VideoJob, VideoJobStatus
     
     result = await db.execute(
-        select(VideoJob).where(VideoJob.video_id == video_id, VideoJob.job_type == job_type)
+        select(VideoJob)
+        .where(VideoJob.video_id == video_id)
+        .order_by(VideoJob.created_at)
+        .limit(1)
     )
     job = result.scalar_one_or_none()
-    
+
     if job:
         job.status = VideoJobStatus(status)
         job.progress_pct = progress
-        job.log_text = log_text
         await db.commit()

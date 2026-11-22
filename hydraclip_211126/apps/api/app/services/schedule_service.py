@@ -1,11 +1,17 @@
 """Schedule Service for Publishing."""
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
-from app.models.schedule import Schedule, PublishedPost, ScheduleStatus, Platform
+from app.models.schedule import (
+    Schedule,
+    PublishedPost,
+    PublishedPostStatus,
+    ScheduleStatus,
+    Platform,
+)
 from app.models.video import Video, VideoStatus
-from app.services.storage_service import get_file_url
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +33,7 @@ async def publish_now(
         platform=schedule.platform,
         title=video.title,
         description=video.description,
-        status="pending",
+        status=PublishedPostStatus.PENDING,
     )
     db.add(post)
     await db.flush()
@@ -40,15 +46,15 @@ async def publish_now(
             result = await upload_to_youtube(video, post)
             post.platform_post_id = result.get("video_id")
             post.platform_url = result.get("url")
-            post.status = "published"
+            post.status = PublishedPostStatus.PUBLISHED
             post.published_at = datetime.now(timezone.utc)
         except Exception as e:
             logger.error(f"YouTube upload failed: {e}")
-            post.status = "failed"
+            post.status = PublishedPostStatus.FAILED
             post.error_message = str(e)
     else:
         # Manual export for other platforms
-        post.status = "manual_required"
+        post.status = PublishedPostStatus.MANUAL_REQUIRED
         post.error_message = f"Manual upload required for {schedule.platform}"
     
     await db.commit()

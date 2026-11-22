@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.security import oauth2_scheme, decode_token
 from app.models.user import User, UserRole
-from app.models.video import Video, VideoJob
+from app.models.video import Video, VideoJob, VideoJobStatus
 from app.models.billing import BillingEvent
 from app.models.user import Plan
 from app.models.system import SystemSetting, AdminAuditLog
@@ -90,9 +90,9 @@ async def get_metrics(
     # Jobs
     jobs_result = await db.execute(select(VideoJob))
     jobs = jobs_result.scalars().all()
-    jobs_queued = sum(1 for j in jobs if j.status == "queued")
-    jobs_running = sum(1 for j in jobs if j.status == "running")
-    jobs_failed = sum(1 for j in jobs if j.status == "failed")
+    jobs_queued = sum(1 for j in jobs if j.status == VideoJobStatus.QUEUED)
+    jobs_running = sum(1 for j in jobs if j.status == VideoJobStatus.RUNNING)
+    jobs_failed = sum(1 for j in jobs if j.status == VideoJobStatus.FAILED)
     
     # Storage
     storage_result = await db.execute(

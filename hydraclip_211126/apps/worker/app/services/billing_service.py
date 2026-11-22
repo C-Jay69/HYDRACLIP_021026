@@ -3,24 +3,24 @@
 import logging
 from typing import Optional
 
+from sqlalchemy import select
+
 from app.core.database import AsyncSessionLocal
-from app.models.user import User
-from app.models.billing import Plan, BillingEvent
-from app.models.subscription import Subscription
+from app.models.billing import BillingEvent
+from app.models.user import Plan, Subscription, User
 
 logger = logging.getLogger(__name__)
 
 
 async def create_checkout_session(plan_id: str, user_id: str) -> str:
     """Create a Stripe checkout session."""
-    from app.services.storage_service import upload_file
-    
     # Get plan
-    result = await AsyncSessionLocal().execute(select(Plan).where(Plan.id == plan_id))
-    plan = result.scalar_one_or_none()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Plan).where(Plan.id == plan_id))
+        plan = result.scalar_one_or_none()
     if not plan:
         raise ValueError(f"Plan {plan_id} not found")
-    
+
     # In production, this would call Stripe API
     # For now, return a mock URL
     return f"https://checkout.stripe.com/pay/cs_test_{plan_id}_{user_id}"
@@ -39,15 +39,30 @@ async def sync_subscription(user_id: str) -> dict:
         user = result.scalar_one_or_none()
         if not user:
             raise ValueError(f"User {user_id} not found")
-        
-        # Update subscription status
-        user.subscription_status = "active"
-        user.plan = plan.name if hasattr(plan, 'name') else "Creator"
-        user.video_limit_monthly = plan.video_limit_monthly if hasattr(plan, 'video_limit_monthly') else 25
-        user.storage_limit_gb = plan.storage_limit_gb if hasattr(plan, 'storage_limit_gb') else 10
-        
+
+        sub_result = await db.execute(
+            select(Subscription)
+            .where(Subscription.user_id == user_id)
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+        subscription = sub_result.scalar_one_or_none()
+
+        plan = None
+        if subscription is not None:
+            plan_result = await db.execute(
+                select(Plan).where(Plan.id == subscription.plan_id)
+            )
+            plan = plan_result.scalar_one_or_none()
+
+        user.subscription_status = subscription.status if subscription else "active"
+        if plan is not None:
+            user.plan = plan.name
+            user.video_limit_monthly = plan.video_limit_monthly
+            user.storage_limit_gb = plan.storage_limit_gb
+
         await db.commit()
-        
+
         return {
             "plan": user.plan,
             "status": user.subscription_status,

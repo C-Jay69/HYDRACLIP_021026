@@ -1,6 +1,7 @@
 """Schedules Router."""
 
 from typing import Optional, List
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import oauth2_scheme, decode_token
 from app.models.user import User
+from app.models.video import Video, VideoStatus
 from app.models.schedule import Schedule, ScheduleStatus, Platform
 import secrets
 from app.services.schedule_service import publish_now
@@ -102,13 +104,25 @@ async def create_schedule(
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    
+
+    try:
+        scheduled_at = datetime.fromisoformat(
+            schedule.scheduled_at.replace("Z", "+00:00")
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail="scheduled_at must be an ISO 8601 datetime",
+        )
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+
     new_schedule = Schedule(
         id=secrets.token_urlsafe(16),
         video_id=schedule.video_id,
         user_id=user.id,
         platform=schedule.platform,
-        scheduled_at=schedule.scheduled_at,
+        scheduled_at=scheduled_at,
         timezone=schedule.timezone,
         status=ScheduleStatus.PENDING,
     )

@@ -27,6 +27,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("Starting HydraClip API...")
     await init_db()
     print("✓ Database connected")
+    try:
+        from app.services.storage_service import ensure_bucket
+
+        ensure_bucket()
+        print("✓ Object storage bucket ready")
+    except Exception as exc:
+        print(f"⚠ Could not initialise object storage: {exc}")
+    try:
+        from app.services.seed_service import seed_reference_data
+
+        await seed_reference_data()
+        print("✓ Reference data ready")
+    except Exception as exc:
+        print(f"⚠ Could not seed reference data: {exc}")
     yield
     print("Shutting down HydraClip API...")
     await close_db()

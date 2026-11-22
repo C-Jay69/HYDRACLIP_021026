@@ -1,5 +1,6 @@
 """Video Generation Tasks."""
 
+import asyncio
 import logging
 from celery import shared_task
 from app.core.database import AsyncSessionLocal
@@ -14,7 +15,7 @@ def generate_video(self, video_id: str, user_id: str):
     """Generate a video from a topic."""
     try:
         orchestrator = VideoGenerationOrchestrator()
-        result = orchestrator.generate(video_id, user_id)
+        result = asyncio.run(orchestrator.generate(video_id, user_id))
         return result
     except Exception as e:
         logger.error(f"Video generation failed: {e}")
@@ -26,7 +27,7 @@ def regenerate_step(self, video_id: str, step: str):
     """Regenerate a specific step of video generation."""
     try:
         orchestrator = VideoGenerationOrchestrator()
-        result = orchestrator.regenerate_step(video_id, step)
+        result = asyncio.run(orchestrator.regenerate_step(video_id, step))
         return result
     except Exception as e:
         logger.error(f"Step regeneration failed: {e}")

@@ -14,7 +14,12 @@ from app.models.video import Video, VideoJob, VideoStatus, VideoJobType, VideoJo
 from app.models.project import Project
 import secrets
 from app.services.video_service import generate_video_pipeline
-from app.services.storage_service import upload_file, delete_file, get_file_url
+from app.services.storage_service import (
+    upload_file,
+    delete_file,
+    get_file_url,
+    file_exists,
+)
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -159,6 +164,8 @@ async def generate_video(
         status=VideoStatus.QUEUED,
     )
     db.add(video)
+    # Track monthly usage for the user's quota.
+    user.videos_this_month = (user.videos_this_month or 0) + 1
     await db.commit()
     await db.refresh(video)
     
@@ -226,8 +233,9 @@ async def get_video_status(
                 "job_type": j.job_type.value,
                 "status": j.status.value,
                 "progress_pct": j.progress_pct,
-                "log_text": j.log_text,
                 "error_message": j.error_message,
+                "started_at": j.started_at.isoformat() if j.started_at else None,
+                "completed_at": j.completed_at.isoformat() if j.completed_at else None,
             }
             for j in jobs
         ],
@@ -251,7 +259,13 @@ async def download_video(
     
     if not video.storage_key:
         raise HTTPException(status_code=404, detail="Video not yet generated")
-    
+
+    if not file_exists(video.storage_key):
+        raise HTTPException(
+            status_code=404,
+            detail="Video file is not available in storage",
+        )
+
     return {"download_url": get_file_url(video.storage_key)}
 
 

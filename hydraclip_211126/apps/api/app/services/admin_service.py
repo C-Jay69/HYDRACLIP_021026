@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.core.database import AsyncSessionLocal
 from app.models.user import User, UserRole
-from app.models.admin_audit_log import AdminAuditLog
+from app.models.system import AdminAuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ async def log_admin_action(
     metadata: Optional[dict] = None,
 ) -> AdminAuditLog:
     """Log an admin action for audit."""
-    from app.models.admin_audit_log import AdminAuditLog
+    from app.models.system import AdminAuditLog
     from datetime import datetime, timezone
     
     log = AdminAuditLog(
