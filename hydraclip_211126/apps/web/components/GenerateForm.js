@@ -139,7 +139,7 @@ export function GenerateForm({ onGenerated }) {
         <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
           Generation runs in the background. Rendering is CPU-bound and usually
-          takes a few minutes per short.
+          takes several minutes per short.
         </span>
       </div>
     </section>

@@ -46,12 +46,25 @@ class VideoPlan:
         self,
         audio_src: Optional[str],
         duration_seconds: float,
+        images: Optional[list[dict[str, Any]]] = None,
         subtitle: str = "Made with HydraClip",
     ) -> dict[str, Any]:
+        image_list = images or []
+        scenes = []
+        for index, text in enumerate(self.scenes):
+            image = image_list[index % len(image_list)] if image_list else None
+            scenes.append(
+                {
+                    "text": text,
+                    "image": image.get("src") if image else None,
+                    "credit": image.get("credit") if image else None,
+                }
+            )
+
         return {
             "title": self.title,
             "subtitle": subtitle,
-            "scenes": [{"text": text} for text in self.scenes],
+            "scenes": scenes,
             "audioSrc": audio_src,
             "durationSeconds": round(float(duration_seconds), 2),
             "accent": self.accent,

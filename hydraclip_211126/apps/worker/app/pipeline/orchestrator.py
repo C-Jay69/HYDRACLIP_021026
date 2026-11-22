@@ -7,6 +7,7 @@ Pipeline:
 4. The MP4 is uploaded to S3-compatible storage (SeaweedFS/MinIO).
 """
 
+import asyncio
 import base64
 import io
 import logging
@@ -25,6 +26,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.video import Video, VideoJob, VideoJobStatus, VideoJobType, VideoStatus
 from app.pipeline.providers.openrouter import OpenRouterProvider, VideoPlan
 from app.pipeline.providers.tts import EdgeTTSProvider, PiperTTSProvider
+from app.pipeline.providers.unsplash import UnsplashProvider
 from app.pipeline.render_client import RenderClient
 
 settings = get_settings()
@@ -36,6 +38,7 @@ class VideoGenerationOrchestrator:
 
     def __init__(self):
         self.planner = OpenRouterProvider()
+        self.unsplash = UnsplashProvider()
         self.tts_provider = EdgeTTSProvider()
         self.tts_fallback = PiperTTSProvider(model_path=settings.piper_model_path)
         self.renderer = RenderClient()
@@ -81,8 +84,21 @@ class VideoGenerationOrchestrator:
                     db, video_id, VideoJobStatus.RUNNING, 25, "Script ready"
                 )
 
-                # 2. Generate voiceover
-                audio_path = await self._make_audio(plan, workdir)
+                # 2. Find visuals and generate the voiceover in parallel.
+                description = (
+                    (video.description or "").replace("Video about ", "").strip()
+                )
+                image_query = f"{video.title} {description}".strip()
+                image_count = max(3, min(len(plan.scenes), 6))
+                photos, audio_path = await asyncio.gather(
+                    self.unsplash.search_images(image_query, count=image_count),
+                    self._make_audio(plan, workdir),
+                )
+                if not photos:
+                    logger.warning(
+                        "No Unsplash photos found; using the gradient background"
+                    )
+
                 duration = self._audio_duration(audio_path) or self._estimate_duration(
                     plan.narration
                 )
@@ -92,13 +108,14 @@ class VideoGenerationOrchestrator:
                     video_id,
                     VideoJobStatus.RUNNING,
                     45,
-                    f"Voiceover ready ({duration:.1f}s)",
+                    f"Visuals ready ({len(photos)} photos), voiceover {duration:.1f}s",
                 )
 
                 # 3. Render with Remotion
                 input_props = plan.to_input_props(
                     audio_src=self._to_data_uri(audio_path),
                     duration_seconds=duration,
+                    images=photos,
                 )
                 await self._update_job(
                     db, video_id, VideoJobStatus.RUNNING, 55, "Rendering video..."

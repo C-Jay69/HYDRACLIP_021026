@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   AbsoluteFill,
   Audio,
+  Img,
   Sequence,
   interpolate,
   spring,
@@ -12,6 +13,8 @@ import {
 export type Scene = {
   text: string;
   accent?: string;
+  image?: string | null;
+  credit?: string | null;
 };
 
 export type HydraClipProps = {
@@ -55,11 +58,22 @@ export const calculateMetadata = ({
 
 const SceneCard: React.FC<{
   scene: Scene;
+  index: number;
   durationInFrames: number;
   accent: string;
-}> = ({ scene, durationInFrames, accent }) => {
+  backgroundStart: string;
+  backgroundEnd: string;
+}> = ({
+  scene,
+  index,
+  durationInFrames,
+  accent,
+  backgroundStart,
+  backgroundEnd,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const [imageFailed, setImageFailed] = useState(false);
 
   const enter = spring({
     frame,
@@ -77,50 +91,120 @@ const SceneCard: React.FC<{
   const translateY = interpolate(enter, [0, 1], [70, 0]);
   const scale = interpolate(enter, [0, 1], [0.92, 1]);
 
+  // Alternating Ken Burns direction keeps consecutive photos from feeling static.
+  const direction = index % 2 === 0 ? 1 : -1;
+  const imageScale = interpolate(
+    frame,
+    [0, Math.max(1, durationInFrames)],
+    [1.06, 1.2],
+    { extrapolateRight: "clamp" },
+  );
+  const imageTranslateX = interpolate(
+    frame,
+    [0, Math.max(1, durationInFrames)],
+    [-16 * direction, 16 * direction],
+    { extrapolateRight: "clamp" },
+  );
+  const imageTranslateY = interpolate(
+    frame,
+    [0, Math.max(1, durationInFrames)],
+    [-12, 12],
+    { extrapolateRight: "clamp" },
+  );
+
   const text = scene.text ?? "";
   const fontSize =
     text.length > 90 ? 62 : text.length > 55 ? 76 : text.length > 28 ? 94 : 110;
+  const hasImage = Boolean(scene.image) && !imageFailed;
 
   return (
-    <AbsoluteFill
-      style={{
-        justifyContent: "center",
-        alignItems: "center",
-        padding: "0 90px",
-        opacity,
-      }}
-    >
-      <div
+    <AbsoluteFill style={{ opacity }}>
+      {hasImage ? (
+        <AbsoluteFill style={{ overflow: "hidden", backgroundColor: "#04070f" }}>
+          <Img
+            src={scene.image as string}
+            onError={() => setImageFailed(true)}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              transform: `scale(${imageScale}) translate(${imageTranslateX}px, ${imageTranslateY}px)`,
+            }}
+          />
+          <AbsoluteFill
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(4,7,15,0.82) 0%, rgba(4,7,15,0.38) 32%, rgba(4,7,15,0.58) 68%, rgba(4,7,15,0.94) 100%)",
+            }}
+          />
+        </AbsoluteFill>
+      ) : (
+        <AbsoluteFill
+          style={{
+            background: `linear-gradient(135deg, ${backgroundStart} 0%, ${backgroundEnd} 100%)`,
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: -220,
+              left: -180 + (index % 2) * 260,
+              width: 900,
+              height: 900,
+              borderRadius: "50%",
+              background: `radial-gradient(circle, ${accent}44 0%, ${accent}11 38%, transparent 70%)`,
+            }}
+          />
+        </AbsoluteFill>
+      )}
+
+      <AbsoluteFill
         style={{
-          transform: `translateY(${translateY}px) scale(${scale})`,
-          textAlign: "center",
-          maxWidth: 900,
+          justifyContent: "center",
+          alignItems: "center",
+          padding: "0 90px",
         }}
       >
         <div
           style={{
-            width: 110,
-            height: 10,
-            borderRadius: 5,
-            background: scene.accent || accent,
-            margin: "0 auto 42px",
-          }}
-        />
-        <div
-          style={{
-            fontSize,
-            lineHeight: 1.12,
-            fontWeight: 800,
-            color: "#ffffff",
-            letterSpacing: "-1.5px",
-            textShadow: "0 4px 12px rgba(0,0,0,0.35)",
-            fontFamily: "DejaVu Sans, Arial, sans-serif",
-            overflowWrap: "break-word",
+            transform: `translateY(${translateY}px) scale(${scale})`,
+            textAlign: "center",
+            maxWidth: 900,
           }}
         >
-          {text}
+          <div
+            style={{
+              width: 110,
+              height: 10,
+              borderRadius: 5,
+              background: scene.accent || accent,
+              margin: "0 auto 42px",
+            }}
+          />
+          <div
+            style={{
+              fontSize,
+              lineHeight: 1.12,
+              fontWeight: 800,
+              color: "#ffffff",
+              letterSpacing: "-1.5px",
+              textShadow: "0 6px 26px rgba(0,0,0,0.75)",
+              fontFamily: "DejaVu Sans, Arial, sans-serif",
+              overflowWrap: "break-word",
+            }}
+          >
+            {text}
+          </div>
         </div>
-      </div>
+      </AbsoluteFill>
+
+      {/* Vignette keeps the edges quiet and the text readable over busy photos. */}
+      <AbsoluteFill
+        style={{
+          background:
+            "radial-gradient(circle at 50% 45%, transparent 30%, rgba(0,0,0,0.42) 100%)",
+        }}
+      />
     </AbsoluteFill>
   );
 };
@@ -188,7 +272,32 @@ export const HydraClipShort: React.FC<HydraClipProps> = (props) => {
           width: 900,
           height: 900,
           borderRadius: "50%",
-          background: `radial-gradient(circle, ${accent}44 0%, ${accent}11 38%, transparent 70%)`,
+          background: `radial-gradient(circle, ${accent}33 0%, ${accent}0d 38%, transparent 70%)`,
+        }}
+      />
+
+      {timed.map((item) => (
+        <Sequence
+          key={item.index}
+          from={item.from}
+          durationInFrames={item.durationInFrames}
+        >
+          <SceneCard
+            scene={item.scene}
+            index={item.index}
+            durationInFrames={item.durationInFrames}
+            accent={accent}
+            backgroundStart={backgroundStart}
+            backgroundEnd={backgroundEnd}
+          />
+        </Sequence>
+      ))}
+
+      {/* Header and footer sit above the scene imagery. */}
+      <AbsoluteFill
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(4,7,15,0.9) 0%, transparent 18%, transparent 82%, rgba(4,7,15,0.92) 100%)",
         }}
       />
 
@@ -216,7 +325,14 @@ export const HydraClipShort: React.FC<HydraClipProps> = (props) => {
         >
           {props.brand || "HYDRACLIP"}
         </div>
-        <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 24 }}>
+        <div
+          style={{
+            color: "rgba(255,255,255,0.7)",
+            fontSize: 24,
+            fontWeight: 600,
+            textShadow: "0 2px 8px rgba(0,0,0,0.6)",
+          }}
+        >
           {String(activeScene).padStart(2, "0")} /{" "}
           {String(scenes.length).padStart(2, "0")}
         </div>
@@ -232,26 +348,30 @@ export const HydraClipShort: React.FC<HydraClipProps> = (props) => {
           color: "#ffffff",
           fontSize: 42,
           fontWeight: 600,
-          opacity: 0.9,
+          opacity: 0.95,
           lineHeight: 1.15,
+          textShadow: "0 4px 18px rgba(0,0,0,0.7)",
         }}
       >
         {props.title}
       </div>
 
-      {timed.map((item) => (
-        <Sequence
-          key={item.index}
-          from={item.from}
-          durationInFrames={item.durationInFrames}
+      {scenes[activeScene - 1]?.credit ? (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 138,
+            left: 90,
+            right: 90,
+            textAlign: "center",
+            fontSize: 18,
+            color: "rgba(255,255,255,0.55)",
+            textShadow: "0 2px 8px rgba(0,0,0,0.8)",
+          }}
         >
-          <SceneCard
-            scene={item.scene}
-            durationInFrames={item.durationInFrames}
-            accent={accent}
-          />
-        </Sequence>
-      ))}
+          {scenes[activeScene - 1].credit}
+        </div>
+      ) : null}
 
       <div
         style={{
@@ -281,9 +401,10 @@ export const HydraClipShort: React.FC<HydraClipProps> = (props) => {
         <div
           style={{
             marginTop: 20,
-            color: "rgba(255,255,255,0.55)",
+            color: "rgba(255,255,255,0.6)",
             fontSize: 24,
             textAlign: "center",
+            textShadow: "0 2px 8px rgba(0,0,0,0.6)",
           }}
         >
           {props.subtitle || ""}

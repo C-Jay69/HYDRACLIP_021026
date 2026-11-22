@@ -135,16 +135,21 @@ Generation is a real end-to-end pipeline, not a simulation:
 1. **API** - `POST /api/videos/videos/generate` creates the `Video` + `VideoJob`
    rows and enqueues `tasks.video_generation.generate_video` on Celery.
 2. **Worker** - asks **OpenRouter** for a structured plan (title, narration,
-   on-screen scenes, colors), synthesizes the voiceover
-   (Edge TTS → Piper → silence fallback), and sends the plan to the renderer.
+   on-screen scenes, colors), searches **Unsplash** for portrait background
+   photos, synthesizes the voiceover (Edge TTS → Piper → silence fallback), and
+   sends everything to the renderer.
 3. **Renderer** - `apps/renderer` is a Remotion (React) service that renders a
-   1080x1920 H.264 MP4. The worker uploads it to SeaweedFS/S3 and the API's
-   `/download` endpoint returns a presigned URL.
+   1080x1920 H.264 MP4 with photo backgrounds, a Ken Burns motion effect, dark
+   overlays and photographer credits. The worker uploads it to SeaweedFS/S3 and
+   the API's `/download` endpoint returns a presigned URL.
 
 ```bash
 # Required for LLM planning (https://openrouter.ai/keys)
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_MODEL=openrouter/auto
+
+# Background photos (https://unsplash.com/developers)
+UNSPLASH_ACCESS_KEY=...
 
 # Remotion licence: "free-license" is valid for individuals and
 # companies of up to 3 people. Larger companies need a Company License.
@@ -156,9 +161,10 @@ RENDER_TIMEOUT_SECONDS=1800
 ```
 
 If `OPENROUTER_API_KEY` is empty, the worker uses a deterministic fallback
-plan, so the pipeline still renders. The renderer is CPU-only; a 30-second
-short can take several minutes. Raise `RENDER_TABS` if the host has more
-cores. Health check: `http://localhost:3002/health`.
+plan. If `UNSPLASH_ACCESS_KEY` is empty (or a search returns nothing), the
+composition falls back to the animated gradient background. The renderer is
+CPU-only; a 30-second short can take several minutes. Raise `RENDER_TABS` if the
+host has more cores. Health check: `http://localhost:3002/health`.
 
 ## AI Model Setup
 

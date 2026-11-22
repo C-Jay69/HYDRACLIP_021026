@@ -97,6 +97,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openrouter/auto}
+      - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY}
       - RENDERER_URL=http://renderer:3001
       - RENDER_TIMEOUT_SECONDS=${RENDER_TIMEOUT_SECONDS:-1800}
       - APP_URL=http://localhost:3000

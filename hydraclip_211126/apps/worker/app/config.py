@@ -78,6 +78,12 @@ class Settings(BaseSettings):
         ge=30,
         description="Maximum time to wait for a render",
     )
+
+    # Stock imagery
+    unsplash_access_key: str = Field(
+        default="",
+        description="Unsplash access key used for background photos",
+    )
     
     # App
     app_url: str = Field("http://localhost:3000", description="Application URL")
