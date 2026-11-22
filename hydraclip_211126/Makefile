@@ -1,4 +1,7 @@
-.PHONY: setup up down migrate seed logs worker-logs shell-api shell-worker test pull-model clean help
+.PHONY: setup up down web-dev migrate seed logs worker-logs shell-api shell-worker test pull-model clean help
+
+# Port for the local Next.js dev server
+PORT ?= 3022
 
 # Setup
 setup:
@@ -17,6 +20,11 @@ up:
 
 down:
 	docker-compose down
+
+# Local Next.js dev server. The web app lives in apps/web, not the repo root.
+# Usage: make web-dev [PORT=3023]
+web-dev:
+	cd apps/web && bun run dev -- -p $(PORT)
 
 logs:
 	docker-compose logs -f

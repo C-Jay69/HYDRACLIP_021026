@@ -39,6 +39,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -59,13 +63,13 @@ class UserResponse(BaseModel):
     storage_limit_gb: int
 
 
-def create_session(user_id: str, db: AsyncSession) -> Session:
-    """Create a new session for user."""
+def create_session(user_id: str, db: AsyncSession) -> tuple[Session, str]:
+    """Create a new session for user and return it with the raw refresh token."""
     import secrets
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
-    
+
     session = Session(
         id=secrets.token_urlsafe(16),
         user_id=user_id,
@@ -73,7 +77,7 @@ def create_session(user_id: str, db: AsyncSession) -> Session:
         expires_at=expires_at,
     )
     db.add(session)
-    return session
+    return session, token
 
 
 import hashlib
@@ -110,15 +114,14 @@ async def register(
     )
     db.add(user)
     await db.flush()
-    
+
     # Create session
-    session = create_session(user.id, db)
+    session, refresh_token = create_session(user.id, db)
     await db.commit()
-    
+
     # Create tokens
     access_token = create_access_token(subject=user.id)
-    refresh_token = session.token_hash
-    
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -155,13 +158,12 @@ async def login(
         )
     
     # Create session
-    session = create_session(user.id, db)
+    session, refresh_token = create_session(user.id, db)
     await db.commit()
-    
+
     # Create tokens
     access_token = create_access_token(subject=user.id)
-    refresh_token = session.token_hash
-    
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -199,44 +201,53 @@ async def logout(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    token: str = Depends(oauth2_scheme),
+    body: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Refresh access token using refresh token."""
-    try:
-        payload = decode_token(token)
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        
-        # Verify session exists
-        result = await db.execute(
-            select(Session).where(Session.user_id == user_id)
-        )
-        session = result.scalar_one_or_none()
-        if not session:
-            raise HTTPException(status_code=401, detail="Session expired")
-        
-        # Create new access token
-        access_token = create_access_token(subject=user_id)
-        
-        # Get user
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=token,
-            user={
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "role": user.role.value,
-                "plan": user.plan,
-            },
-        )
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    """Exchange a refresh token for a new access token.
+
+    The database stores only the SHA-256 hash of the refresh token. The token
+    is rotated on every refresh so a stolen refresh token is single-use.
+    """
+    token_hash = hashlib.sha256(body.refresh_token.encode()).hexdigest()
+
+    result = await db.execute(
+        select(Session).where(Session.token_hash == token_hash)
+    )
+    session = result.scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    expires_at = session.expires_at if session else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if session is None or expires_at is None or expires_at <= now:
+        raise HTTPException(status_code=401, detail="Session expired")
+
+    result = await db.execute(select(User).where(User.id == session.user_id))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    # Rotate the refresh token
+    new_refresh_token = secrets.token_urlsafe(32)
+    session.token_hash = hashlib.sha256(new_refresh_token.encode()).hexdigest()
+    session.expires_at = now + timedelta(days=settings.refresh_token_expire_days)
+    await db.commit()
+
+    access_token = create_access_token(subject=user.id)
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=new_refresh_token,
+        user={
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role.value,
+            "plan": user.plan,
+        },
+    )
 
 
 @router.get("/me", response_model=UserResponse)

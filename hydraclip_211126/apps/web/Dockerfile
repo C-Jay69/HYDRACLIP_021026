@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
@@ -10,10 +10,12 @@ RUN npm install
 COPY . .
 
 # Build the application
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 # Expose port
 EXPOSE 3000
 
 # Run the application
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]

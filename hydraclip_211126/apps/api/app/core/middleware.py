@@ -59,9 +59,13 @@ def add_cors_middleware(app) -> None:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
+        # Allow any localhost/127.0.0.1 port for local development
+        # (Next.js may pick 3000-3023 depending on what is already running).
+        allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        max_age=600,
     )
 
 def add_security_headers(app) -> None:
