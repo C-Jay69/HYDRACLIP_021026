@@ -1,12 +1,15 @@
 """OAuth Router."""
 
+import urllib.parse
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import oauth2_scheme, decode_token
+from app.core.security import oauth2_scheme, create_access_token, decode_token
 from app.models.user import User
 from app.models.social import SocialAccount, PlatformToken
 from app.core.encryption import encrypt_token
@@ -45,17 +48,29 @@ async def youtube_connect(
     user: User = Depends(get_current_user),
 ):
     """Initiate YouTube OAuth flow."""
-    # Build OAuth URL
-    auth_url = (
-        "https://accounts.google.com/o/oauth2/v2/auth"
-        f"?client_id={settings.youtube_client_id}"
-        f"&redirect_uri={settings.youtube_redirect_uri}"
-        "&response_type=code"
-        "&scope=https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
-        "&access_type=offline"
-        "&prompt=consent"
+    # A short-lived signed token identifies the user in the callback and
+    # protects the flow against CSRF/state tampering.
+    state = create_access_token(
+        subject=user.id,
+        expires_delta=timedelta(minutes=15),
+        purpose="youtube_oauth",
     )
-    return {"auth_url": auth_url}
+
+    params = urllib.parse.urlencode(
+        {
+            "client_id": settings.youtube_client_id,
+            "redirect_uri": settings.youtube_redirect_uri,
+            "response_type": "code",
+            "scope": (
+                "https://www.googleapis.com/auth/youtube.upload "
+                "https://www.googleapis.com/auth/youtube.readonly"
+            ),
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": state,
+        }
+    )
+    return {"auth_url": f"https://accounts.google.com/o/oauth2/v2/auth?{params}"}
 
 
 @router.get("/youtube/callback")
@@ -65,6 +80,21 @@ async def youtube_callback(
     db: AsyncSession = Depends(get_db),
 ):
     """Handle YouTube OAuth callback."""
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
+
+    try:
+        state_payload = decode_token(state)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    if state_payload.get("purpose") != "youtube_oauth":
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    user_id = state_payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
     # Exchange code for tokens
     import httpx
     
@@ -103,7 +133,7 @@ async def youtube_callback(
     import secrets
     account = SocialAccount(
         id=secrets.token_urlsafe(16),
-        user_id=state or "unknown",  # In production, use state to identify user
+        user_id=user_id,
         platform="youtube",
         account_name=channel_name,
         account_id=channel_id,
