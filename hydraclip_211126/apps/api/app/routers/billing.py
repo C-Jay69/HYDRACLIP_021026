@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import oauth2_scheme, decode_token
 from app.models.user import User
-from app.models.billing import Plan, BillingEvent
+from app.models.billing import BillingEvent
+from app.models.user import Plan
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 

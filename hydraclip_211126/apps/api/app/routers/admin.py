@@ -11,7 +11,8 @@ from app.core.database import get_db
 from app.core.security import oauth2_scheme, decode_token
 from app.models.user import User, UserRole
 from app.models.video import Video, VideoJob
-from app.models.billing import Plan, BillingEvent
+from app.models.billing import BillingEvent
+from app.models.user import Plan
 from app.models.system import SystemSetting, AdminAuditLog
 from app.models.social import SocialAccount
 

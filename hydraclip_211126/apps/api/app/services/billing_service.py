@@ -5,7 +5,8 @@ from typing import Optional
 
 from app.core.database import AsyncSessionLocal
 from app.models.user import User
-from app.models.billing import Plan, BillingEvent
+from app.models.billing import BillingEvent
+from app.models.user import Plan
 from app.models.subscription import Subscription
 
 logger = logging.getLogger(__name__)
