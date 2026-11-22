@@ -1,19 +1,31 @@
-"""Video Generation Orchestrator."""
+"""Video Generation Orchestrator.
 
+Pipeline:
+1. OpenRouter (or deterministic fallback) produces a structured video plan.
+2. Edge TTS / Piper (or silence) produces the voiceover audio.
+3. The Remotion render service renders the composition to an MP4.
+4. The MP4 is uploaded to S3-compatible storage (SeaweedFS/MinIO).
+"""
+
+import base64
+import io
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from typing import Optional
 
+from minio import Minio
 from sqlalchemy import select
 
-from app.core.database import AsyncSessionLocal
-from app.models.video import Video, VideoJob, VideoStatus, VideoJobType, VideoJobStatus
-from app.pipeline.providers.text_generation import OllamaProvider
-from app.pipeline.providers.tts import EdgeTTSProvider, PiperTTSProvider
-from app.pipeline.providers.stt import FasterWhisperProvider
-from app.pipeline.providers.video_render import FFmpegVideoRenderProvider
-from app.pipeline.providers.thumbnail import TemplateThumbnailProvider
 from app.config import get_settings
+from app.core.database import AsyncSessionLocal
+from app.models.video import Video, VideoJob, VideoJobStatus, VideoJobType, VideoStatus
+from app.pipeline.providers.openrouter import OpenRouterProvider, VideoPlan
+from app.pipeline.providers.tts import EdgeTTSProvider, PiperTTSProvider
+from app.pipeline.render_client import RenderClient
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -23,150 +35,244 @@ class VideoGenerationOrchestrator:
     """Orchestrates the full video generation pipeline."""
 
     def __init__(self):
-        self.text_provider = OllamaProvider(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-        )
+        self.planner = OpenRouterProvider()
         self.tts_provider = EdgeTTSProvider()
         self.tts_fallback = PiperTTSProvider(model_path=settings.piper_model_path)
-        self.stt_provider = FasterWhisperProvider(model_size=settings.whisper_model_size)
-        self.video_provider = FFmpegVideoRenderProvider()
-        self.thumbnail_provider = TemplateThumbnailProvider()
+        self.renderer = RenderClient()
+        self.storage = Minio(
+            settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=False,
+            region="us-east-1",
+        )
 
     async def generate(self, video_id: str, user_id: str) -> dict:
         """Run the full video generation pipeline."""
         async with AsyncSessionLocal() as db:
             video: Optional[Video] = None
+            workdir = tempfile.mkdtemp(prefix=f"hydraclip-{video_id}-")
             try:
-                # Get video
                 result = await db.execute(select(Video).where(Video.id == video_id))
                 video = result.scalar_one_or_none()
                 if not video:
                     raise ValueError(f"Video {video_id} not found")
 
-                # Update video status
                 video.status = VideoStatus.GENERATING
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 5, "Starting generation...", started=True)
+                await self._update_job(
+                    db,
+                    video_id,
+                    VideoJobStatus.RUNNING,
+                    5,
+                    "Planning video...",
+                    started=True,
+                )
                 await db.commit()
 
-                # Step 1: Generate script
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 10, "Generating script...")
-                script = await self.text_provider.generate_script(
+                # 1. Plan the video (OpenRouter, with deterministic fallback)
+                plan = await self.planner.generate_plan(
                     topic=video.title,
-                    prompt="Create an engaging short-form video script with hook, key points, and CTA.",
+                    title=video.title,
+                    description=video.description,
+                    duration_seconds=30,
                 )
-                video.script_text = script
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 25, "Script generated")
+                video.script_text = plan.narration
+                await self._update_job(
+                    db, video_id, VideoJobStatus.RUNNING, 25, "Script ready"
+                )
 
-                # Step 2: Generate voiceover
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 45, "Generating voiceover...")
-                audio_file = await self._generate_voiceover(script, video)
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 65, "Voiceover complete")
+                # 2. Generate voiceover
+                audio_path = await self._make_audio(plan, workdir)
+                duration = self._audio_duration(audio_path) or self._estimate_duration(
+                    plan.narration
+                )
+                duration = max(5.0, min(180.0, duration))
+                await self._update_job(
+                    db,
+                    video_id,
+                    VideoJobStatus.RUNNING,
+                    45,
+                    f"Voiceover ready ({duration:.1f}s)",
+                )
 
-                # Step 3: Generate subtitles
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 75, "Generating subtitles...")
-                subtitles = await self._generate_subtitles(audio_file)
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 85, "Subtitles complete")
+                # 3. Render with Remotion
+                input_props = plan.to_input_props(
+                    audio_src=self._to_data_uri(audio_path),
+                    duration_seconds=duration,
+                )
+                await self._update_job(
+                    db, video_id, VideoJobStatus.RUNNING, 55, "Rendering video..."
+                )
+                video_bytes = await self.renderer.render(input_props)
 
-                # Step 4: Render video
-                await self._update_job(db, video_id, VideoJobStatus.RUNNING, 90, "Rendering video...")
-                output_path = await self._render_video(script, audio_file, subtitles, video)
+                # 4. Upload to object storage
+                await self._update_job(
+                    db, video_id, VideoJobStatus.RUNNING, 90, "Uploading video..."
+                )
+                storage_key = f"videos/{video_id}.mp4"
+                self._upload(storage_key, video_bytes)
 
-                # Mark complete
                 video.status = VideoStatus.COMPLETED
-                video.storage_key = output_path
-                video.duration_seconds = 60
+                video.storage_key = storage_key
+                video.duration_seconds = int(round(duration))
                 video.resolution = "1080x1920"
                 video.format = "mp4"
-                await self._update_job(db, video_id, VideoJobStatus.COMPLETED, 100, "Video complete", completed=True)
+                video.error_message = None
+                await self._update_job(
+                    db,
+                    video_id,
+                    VideoJobStatus.COMPLETED,
+                    100,
+                    "Video complete",
+                    completed=True,
+                )
                 await db.commit()
 
-                logger.info(f"Video {video_id} generation complete")
-                return {"success": True, "video_id": video_id, "storage_key": output_path}
+                logger.info(
+                    "Video %s generated (%s bytes, %.1fs)", video_id, len(video_bytes), duration
+                )
+                return {
+                    "success": True,
+                    "video_id": video_id,
+                    "storage_key": storage_key,
+                    "duration_seconds": round(duration, 2),
+                }
 
-            except Exception as e:
-                logger.exception(f"Video generation failed for {video_id}: {e}")
+            except Exception as exc:
+                logger.exception("Video generation failed for %s: %s", video_id, exc)
                 await db.rollback()
                 try:
                     result = await db.execute(select(Video).where(Video.id == video_id))
                     video = result.scalar_one_or_none()
                     if video is not None:
                         video.status = VideoStatus.FAILED
-                        video.error_message = str(e)
+                        video.error_message = str(exc)
                     await self._update_job(
                         db,
                         video_id,
                         VideoJobStatus.FAILED,
-                        error_message=str(e),
+                        error_message=str(exc),
                     )
                     await db.commit()
                 except Exception:
-                    logger.exception(f"Could not record failure for video {video_id}")
+                    logger.exception("Could not record failure for video %s", video_id)
                     await db.rollback()
                 raise
+            finally:
+                shutil.rmtree(workdir, ignore_errors=True)
 
-    async def _generate_voiceover(self, script: str, video: Video) -> str:
-        """Generate voiceover with fallback."""
-        voice = getattr(video, "voice", None) or "en-US-AriaNeural"
-        language = getattr(video, "language", None) or "en"
+    async def _make_audio(self, plan: VideoPlan, workdir: str) -> str:
+        """Generate voiceover audio with fallbacks, returning a usable file path."""
+        mp3_path = os.path.join(workdir, "voiceover.mp3")
         try:
-            return await self.tts_provider.synthesize(
-                text=script,
-                voice=voice,
-                language=language,
-                output_path=f"/tmp/{video.id}_voiceover.wav",
+            path = await self.tts_provider.synthesize(
+                text=plan.narration,
+                voice="en-US-AriaNeural",
+                language="en",
+                output_path=mp3_path,
             )
-        except Exception as e:
-            logger.warning(f"Edge TTS failed, trying Piper: {e}")
-            return await self.tts_fallback.synthesize(
-                text=script,
-                voice=voice,
-                language=language,
-                output_path=f"/tmp/{video.id}_voiceover.wav",
+            if self._is_nonempty(path):
+                return path
+        except Exception as exc:
+            logger.warning("Edge TTS failed: %s", exc)
+
+        wav_path = os.path.join(workdir, "voiceover.wav")
+        try:
+            path = await self.tts_fallback.synthesize(
+                text=plan.narration,
+                voice="en_US-lessac-medium",
+                language="en",
+                output_path=wav_path,
             )
+            if self._is_nonempty(path):
+                return path
+        except Exception as exc:
+            logger.warning("Piper TTS failed: %s", exc)
 
-    async def _generate_subtitles(self, audio_file: str) -> str:
-        """Generate subtitles from audio."""
-        result = await self.stt_provider.transcribe(audio_file)
+        # Last resort: silent audio so the render still succeeds.
+        duration = self._estimate_duration(plan.narration)
+        logger.warning("Falling back to %.1fs of silence for the voiceover", duration)
+        return self._silent_audio(duration, mp3_path)
 
-        # Convert to SRT format
-        srt_path = audio_file.replace(".wav", ".srt")
-        with open(srt_path, "w") as f:
-            for i, segment in enumerate(result.get("segments", []), 1):
-                f.write(f"{i}\n")
-                f.write(f"{self._format_time(segment['start'])} --> {self._format_time(segment['end'])}\n")
-                f.write(f"{segment['text']}\n\n")
+    @staticmethod
+    def _is_nonempty(path: Optional[str]) -> bool:
+        return bool(path) and os.path.exists(path) and os.path.getsize(path) > 1024
 
-        return srt_path
+    @staticmethod
+    def _estimate_duration(text: str) -> float:
+        words = max(1, len(text.split()))
+        return max(8.0, min(90.0, words / 2.5 + 2.0))
 
-    def _format_time(self, seconds: float) -> str:
-        """Format seconds to SRT time format."""
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        millis = int((seconds % 1) * 1000)
-        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
-
-    async def _render_video(self, script: str, audio_file: str, subtitles: str, video: Video) -> str:
-        """Render the final video."""
-        output_path = f"/tmp/{video.id}.mp4"
-
-        if video.format == "short":
-            await self.video_provider.render_short_form(
-                script=script,
-                audio_file=audio_file,
-                subtitles=subtitles,
-                output_path=output_path,
+    @staticmethod
+    def _audio_duration(path: str) -> Optional[float]:
+        """Return audio duration in seconds using ffprobe."""
+        try:
+            process = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
-        else:
-            await self.video_provider.render_long_form(
-                script=script,
-                audio_file=audio_file,
-                subtitles=subtitles,
-                output_path=output_path,
-            )
+            if process.returncode == 0:
+                return float(process.stdout.strip())
+        except Exception as exc:
+            logger.warning("ffprobe failed: %s", exc)
+        return None
 
+    @staticmethod
+    def _silent_audio(duration: float, output_path: str) -> str:
+        process = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=r=44100:cl=mono",
+                "-t",
+                f"{duration:.2f}",
+                "-q:a",
+                "9",
+                "-acodec",
+                "libmp3lame",
+                output_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if process.returncode != 0:
+            raise RuntimeError(f"ffmpeg silence generation failed: {process.stderr[-500:]}")
         return output_path
+
+    @staticmethod
+    def _to_data_uri(path: str) -> str:
+        extension = os.path.splitext(path)[1].lower()
+        mime = "audio/wav" if extension == ".wav" else "audio/mpeg"
+        with open(path, "rb") as handle:
+            encoded = base64.b64encode(handle.read()).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
+
+    def _upload(self, storage_key: str, data: bytes) -> None:
+        bucket = settings.minio_bucket
+        if not self.storage.bucket_exists(bucket):
+            self.storage.make_bucket(bucket)
+        self.storage.put_object(
+            bucket,
+            storage_key,
+            io.BytesIO(data),
+            len(data),
+            content_type="video/mp4",
+        )
 
     async def _update_job(
         self,
@@ -178,7 +284,7 @@ class VideoGenerationOrchestrator:
         started: bool = False,
         completed: bool = False,
         error_message: Optional[str] = None,
-    ):
+    ) -> None:
         """Update the full-pipeline job belonging to a video."""
         result = await db.execute(
             select(VideoJob)
@@ -208,11 +314,10 @@ class VideoGenerationOrchestrator:
         if error_message is not None:
             job.error_message = error_message
         if message:
-            logger.info(f"[{video_id}] {message}")
+            logger.info("[%s] %s", video_id, message)
 
         await db.commit()
 
     async def regenerate_step(self, video_id: str, step: str) -> dict:
         """Regenerate a specific step."""
-        # Implementation for step regeneration
         return {"success": True, "video_id": video_id, "step": step}

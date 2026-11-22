@@ -10,7 +10,10 @@ asyncpg==0.29.0
 psycopg2-binary==2.9.9
 
 # Redis
-redis==5.0.1
+redis==6.2.0
+
+# Celery (task enqueueing from the API)
+celery==5.3.6
 
 # MinIO
 minio==7.2.4

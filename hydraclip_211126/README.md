@@ -128,11 +128,44 @@ make pull-model
 | admin@hydraclip.com | adminpassword123 | ADMIN |
 | test@example.com | testpassword123 | USER |
 
+## Video Generation Pipeline (OpenRouter + Remotion)
+
+Generation is a real end-to-end pipeline, not a simulation:
+
+1. **API** - `POST /api/videos/videos/generate` creates the `Video` + `VideoJob`
+   rows and enqueues `tasks.video_generation.generate_video` on Celery.
+2. **Worker** - asks **OpenRouter** for a structured plan (title, narration,
+   on-screen scenes, colors), synthesizes the voiceover
+   (Edge TTS → Piper → silence fallback), and sends the plan to the renderer.
+3. **Renderer** - `apps/renderer` is a Remotion (React) service that renders a
+   1080x1920 H.264 MP4. The worker uploads it to SeaweedFS/S3 and the API's
+   `/download` endpoint returns a presigned URL.
+
+```bash
+# Required for LLM planning (https://openrouter.ai/keys)
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=openrouter/auto
+
+# Remotion licence: "free-license" is valid for individuals and
+# companies of up to 3 people. Larger companies need a Company License.
+REMOTION_LICENSE_KEY=free-license
+REMOTION_IS_PRODUCTION=false
+RENDER_CONCURRENCY=1
+RENDER_TABS=4
+RENDER_TIMEOUT_SECONDS=1800
+```
+
+If `OPENROUTER_API_KEY` is empty, the worker uses a deterministic fallback
+plan, so the pipeline still renders. The renderer is CPU-only; a 30-second
+short can take several minutes. Raise `RENDER_TABS` if the host has more
+cores. Health check: `http://localhost:3002/health`.
+
 ## AI Model Setup
 
 ### Ollama
 
-Ollama runs in Docker. Pull models:
+Ollama remains available for other tasks, but video generation now uses
+OpenRouter for planning. Pull a model if you want to use Ollama directly:
 
 ```bash
 docker-compose exec ollama ollama pull llama3.2
@@ -141,11 +174,12 @@ docker-compose exec ollama ollama pull mistral
 
 ### Edge TTS
 
-Edge TTS is cloud-based but free. No setup required.
+Edge TTS is cloud-based but free. The worker uses `edge-tts==7.3.1`.
 
 ### Piper TTS
 
-Piper runs locally. Models are downloaded automatically on first use.
+Piper is the local fallback. The worker image bundles the
+`en_US-lessac-medium` voice under `/models/piper`, so it works offline.
 
 ### faster-whisper
 

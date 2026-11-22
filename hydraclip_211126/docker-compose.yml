@@ -58,6 +58,24 @@ services:
       - public
       - internal
 
+  # Remotion render service (turns structured input props into an MP4)
+  renderer:
+    build:
+      context: ./apps/renderer
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3001
+      - REMOTION_BUNDLE_DIR=/app/build
+      - REMOTION_COMPOSITION_ID=HydraClipShort
+      - REMOTION_LICENSE_KEY=${REMOTION_LICENSE_KEY:-free-license}
+      - REMOTION_IS_PRODUCTION=${REMOTION_IS_PRODUCTION:-false}
+      - RENDER_CONCURRENCY=${RENDER_CONCURRENCY:-1}
+      - RENDER_TABS=${RENDER_TABS:-4}
+    ports:
+      - "3002:3001"
+    networks:
+      - internal
+
   # Celery Worker
   worker:
     build:
@@ -75,11 +93,18 @@ services:
       - OLLAMA_MODEL=llama3.2
       - PIPER_MODEL_PATH=/models/piper
       - WHISPER_MODEL_SIZE=tiny
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openrouter/auto}
+      - RENDERER_URL=http://renderer:3001
+      - RENDER_TIMEOUT_SECONDS=${RENDER_TIMEOUT_SECONDS:-1800}
+      - APP_URL=http://localhost:3000
     depends_on:
       - postgres
       - redis
       - minio
       - ollama
+      - renderer
     networks:
       - internal
 

@@ -56,6 +56,28 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="llama3.2", description="Default Ollama model")
     piper_model_path: str = Field(default="/models/piper", description="Piper TTS model path")
     whisper_model_size: str = Field(default="tiny", description="Whisper model size")
+
+    # OpenRouter (LLM planning)
+    openrouter_api_key: str = Field(default="", description="OpenRouter API key")
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL",
+    )
+    openrouter_model: str = Field(
+        default="openrouter/auto",
+        description="OpenRouter model ID used for video planning",
+    )
+
+    # Remotion renderer
+    renderer_url: str = Field(
+        default="http://renderer:3001",
+        description="URL of the Remotion render service",
+    )
+    render_timeout_seconds: int = Field(
+        default=1800,
+        ge=30,
+        description="Maximum time to wait for a render",
+    )
     
     # App
     app_url: str = Field("http://localhost:3000", description="Application URL")

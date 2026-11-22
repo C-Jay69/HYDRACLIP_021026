@@ -22,6 +22,13 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Local TTS fallback voice for Piper (Edge TTS is tried first)
+RUN mkdir -p /models/piper \
+    && curl -L --fail --retry 3 -o /models/piper/en_US-lessac-medium.onnx \
+       https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx \
+    && curl -L --fail --retry 3 -o /models/piper/en_US-lessac-medium.onnx.json \
+       https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+
 # Copy application code
 COPY . .
 

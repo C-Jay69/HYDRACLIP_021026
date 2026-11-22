@@ -1,26 +1,27 @@
 """Videos Router."""
 
+import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import oauth2_scheme, decode_token
+from app.core.celery_client import enqueue_video_generation
 from app.models.user import User
 from app.models.video import Video, VideoJob, VideoStatus, VideoJobType, VideoJobStatus
 from app.models.project import Project
 import secrets
-from app.services.video_service import generate_video_pipeline
 from app.services.storage_service import (
-    upload_file,
     delete_file,
     get_file_url,
     file_exists,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 
@@ -131,13 +132,10 @@ async def get_video(
 @router.post("/generate", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
 async def generate_video(
     body: VideoGenerateRequest,
-    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a video from a topic."""
-    import json
-    
     # Find or create a default project for this user (Video requires project_id)
     result = await db.execute(select(Project).where(Project.user_id == user.id).limit(1))
     project = result.scalar_one_or_none()
@@ -178,15 +176,25 @@ async def generate_video(
     )
     db.add(job)
     await db.commit()
-    
-    # Start generation pipeline in background
-    background_tasks.add_task(
-        generate_video_pipeline,
-        video_id=video.id,
-        user_id=user.id,
-        db_session_factory=lambda: db,
-    )
-    
+
+    # Hand the job to the Celery worker, which plans with OpenRouter,
+    # renders with Remotion and uploads the result to object storage.
+    try:
+        task = enqueue_video_generation(video.id, user.id)
+        job.celery_task_id = task.id
+        await db.commit()
+    except Exception as exc:
+        logger.exception("Could not enqueue generation for video %s", video.id)
+        video.status = VideoStatus.FAILED
+        video.error_message = f"Could not queue generation job: {exc}"
+        job.status = VideoJobStatus.FAILED
+        job.error_message = video.error_message
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Video generation queue is unavailable",
+        )
+
     return VideoResponse(
         id=video.id,
         user_id=video.user_id,
