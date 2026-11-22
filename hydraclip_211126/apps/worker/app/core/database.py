@@ -6,20 +6,20 @@ from typing import AsyncGenerator
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool, QueuePool
 
 from app.config import get_settings
 
 settings = get_settings()
 
-# Create async engine
+# Celery runs each task in its own asyncio.run() loop. A pooled async engine
+# would keep asyncpg connections bound to a closed loop, which raises
+# "got Future attached to a different loop" on the next task. NullPool opens
+# and closes a connection per session, so every task gets loop-safe connections.
 async_engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_size=settings.database_pool_size,
-    max_overflow=settings.database_max_overflow,
-    pool_pre_ping=True,
-    pool_recycle=3600,
+    poolclass=NullPool,
 )
 
 # Create async session factory
