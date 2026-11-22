@@ -3,7 +3,7 @@
 import time
 from typing import Optional
 
-from fastapi import HTTPException, status
+from fastapi import Request,  HTTPException, status
 from redis import Redis
 
 from app.config import get_settings
@@ -67,7 +67,7 @@ general_limiter = RateLimiter(max_requests=settings.rate_limit_general, window_s
 generation_limiter = RateLimiter(max_requests=settings.rate_limit_generation, window_seconds=60)
 
 
-def get_client_ip(request) -> str:
+def get_client_ip(request: Request) -> str:
     """Get client IP address from request."""
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
@@ -75,7 +75,7 @@ def get_client_ip(request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-async def rate_limit_auth(request) -> None:
+async def rate_limit_auth(request: Request) -> None:
     """Rate limit dependency for auth endpoints."""
     ip = get_client_ip(request)
     key = f"rate_limit:auth:{ip}"
@@ -86,7 +86,7 @@ async def rate_limit_auth(request) -> None:
         )
 
 
-async def rate_limit_general(request) -> None:
+async def rate_limit_general(request: Request) -> None:
     """Rate limit dependency for general endpoints."""
     ip = get_client_ip(request)
     key = f"rate_limit:general:{ip}"
@@ -97,7 +97,7 @@ async def rate_limit_general(request) -> None:
         )
 
 
-async def rate_limit_generation(request) -> None:
+async def rate_limit_generation(request: Request) -> None:
     """Rate limit dependency for video generation endpoints."""
     ip = get_client_ip(request)
     key = f"rate_limit:generation:{ip}"

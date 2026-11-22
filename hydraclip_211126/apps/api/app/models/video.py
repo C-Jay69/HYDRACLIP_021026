@@ -73,6 +73,8 @@ class Video(Base):
     project: Mapped["Project"] = relationship(back_populates="videos")
     user: Mapped["User"] = relationship(back_populates="videos")
     video_jobs: Mapped[list["VideoJob"]] = relationship(back_populates="video", cascade="all, delete-orphan")
+    schedules: Mapped[list["Schedule"]] = relationship(back_populates="video", cascade="all, delete-orphan")
+    published_posts: Mapped[list["PublishedPost"]] = relationship(back_populates="video", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index("ix_videos_user_id", "user_id"),

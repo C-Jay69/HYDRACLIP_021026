@@ -2,7 +2,7 @@
 
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import oauth2_scheme, decode_token
 from app.models.user import User
-from app.models.video import Video, VideoJob, VideoStatus, VideoJobType
+from app.models.video import Video, VideoJob, VideoStatus, VideoJobType, VideoJobStatus
+from app.models.project import Project
 import secrets
 from app.services.video_service import generate_video_pipeline
 from app.services.storage_service import upload_file, delete_file, get_file_url
@@ -124,7 +125,7 @@ async def get_video(
 
 @router.post("/generate", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
 async def generate_video(
-    request: VideoGenerateRequest,
+    body: VideoGenerateRequest,
     background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -132,12 +133,28 @@ async def generate_video(
     """Generate a video from a topic."""
     import json
     
+    # Find or create a default project for this user (Video requires project_id)
+    result = await db.execute(select(Project).where(Project.user_id == user.id).limit(1))
+    project = result.scalar_one_or_none()
+    if project is None:
+        project = Project(
+            id=secrets.token_urlsafe(16),
+            user_id=user.id,
+            title=body.title,
+            topic=body.topic,
+            platform_targets="[]",
+        )
+        db.add(project)
+        await db.commit()
+        await db.refresh(project)
+
     # Create video record
     video = Video(
         id=secrets.token_urlsafe(16),
+        project_id=project.id,
         user_id=user.id,
-        title=request.title,
-        description=f"Video about {request.topic}",
+        title=body.title,
+        description=f"Video about {body.topic}",
         script_text=None,
         status=VideoStatus.QUEUED,
     )

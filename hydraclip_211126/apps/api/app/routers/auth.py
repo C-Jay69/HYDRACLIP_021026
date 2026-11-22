@@ -1,9 +1,11 @@
 """Authentication Router."""
 
+import hashlib
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Response, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -79,13 +81,13 @@ import hashlib
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(
-    request: RegisterRequest,
+    body: RegisterRequest,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth),
 ):
     """Register a new user."""
     # Check if email exists
-    result = await db.execute(select(User).where(User.email == request.email))
+    result = await db.execute(select(User).where(User.email == body.email))
     existing = result.scalar_one_or_none()
     if existing:
         raise HTTPException(
@@ -96,9 +98,9 @@ async def register(
     # Create user
     user = User(
         id=secrets.token_urlsafe(16),
-        email=request.email,
-        password_hash=get_password_hash(request.password),
-        name=request.name,
+        email=body.email,
+        password_hash=get_password_hash(body.password),
+        name=body.name,
         role=UserRole.USER,
         is_active=True,
         is_verified=False,
@@ -132,15 +134,15 @@ async def register(
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    request: LoginRequest,
+    body: LoginRequest,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth),
 ):
     """Login user."""
-    result = await db.execute(select(User).where(User.email == request.email))
+    result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     
-    if not user or not verify_password(request.password, user.password_hash):
+    if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
